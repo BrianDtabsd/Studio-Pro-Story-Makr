@@ -1,0 +1,116 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Story Makr - Script Idea Architect</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'neu-base': '#e0e5ec',
+            'neu-text': '#4a5568',
+            'neu-text-dark': '#2d3748',
+            'accent-orange': '#ffad66',
+          },
+          fontFamily: {
+            sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+  <style data-purpose="neumorphism-styles">
+    body {
+      background-color: #e0e5ec;
+      font-family: 'Inter', sans-serif;
+      color: #4a5568;
+    }
+
+    .neu-flat {
+      background: #e0e5ec;
+      box-shadow: 9px 9px 16px rgb(163 177 198 / 0.6), 
+                  -9px -9px 16px rgba(255, 255, 255, 0.5);
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+
+    .neu-btn {
+      background: #e0e5ec;
+      box-shadow: 5px 5px 10px rgb(163 177 198 / 0.6), 
+                  -5px -5px 10px rgba(255, 255, 255, 0.5);
+      border-radius: 50px;
+      transition: all 0.2s ease;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .neu-btn:active {
+      box-shadow: inset 4px 4px 8px rgb(163 177 198 / 0.6), 
+                  inset -4px -4px 8px rgba(255, 255, 255, 0.5);
+    }
+
+    .neu-pressed {
+      background: #e0e5ec;
+      box-shadow: inset 6px 6px 10px 0 rgba(163, 177, 198, 0.7), 
+                  inset -6px -6px 10px 0 rgba(255, 255, 255, 0.8);
+      border-radius: 16px;
+      border: none;
+    }
+    
+    .neu-active-orange {
+       box-shadow: 5px 5px 10px rgb(163 177 198 / 0.6), 
+                  -5px -5px 10px rgba(255, 255, 255, 0.5),
+                  inset 0 0 0 2px #e0e5ec,
+                  0 0 0 2px rgba(255, 138, 76, 0.4);
+    }
+
+    .neu-action-btn {
+      background: #e0e5ec;
+      border: 2px solid rgba(255, 173, 102, 0.2);
+      box-shadow: 6px 6px 12px rgb(163 177 198 / 0.6), 
+                  -6px -6px 12px rgba(255, 255, 255, 0.5),
+                  0 0 15px rgba(255, 173, 102, 0.3);
+    }
+
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #e0e5ec; 
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e0; 
+      border-radius: 4px;
+    }
+  </style>
+<script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.1.0/",
+    "react": "https://esm.sh/react@^19.1.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.0.1",
+    "@google-cloud/text-to-speech": "https://esm.sh/@google-cloud/text-to-speech@^5.3.0",
+    "jszip": "https://esm.sh/jszip@3.10.1"
+  }
+}
+</script>
+<script>
+  window.APP_CONFIG = {
+    GOOGLE_CLOUD_TTS_API_KEY: "AIzaSyBLR4V5JZ-I1DHjV-uALirNNJYprmsw--E"
+  };
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body class="min-h-screen p-4 md:p-8 flex flex-col gap-6">
+  <div id="root" class="flex flex-col h-full relative">
+  </div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
