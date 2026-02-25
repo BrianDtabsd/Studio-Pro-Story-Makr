@@ -1,8 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { ActiveView, NavItem, StoryIdea, ScriptType, VideoGenreId, GeneratedImage, CharacterVoicePreset, ProStorySettings, STORY_SUB_GENRES, PresetVoiceKey, SceneImageDefinition, AIAnalyzedScript, TitleCardData, UserProfile, Project, ProjectState, ProductionProtocol } from './types.ts';
-import { LeftSidebar } from './components/layout/LeftSidebar.tsx';
-import { RightSidebar } from './components/layout/RightSidebar.tsx';
 import { StoryIdeaGenerator } from './components/features/StoryIdeaGenerator.tsx';
 import { ScriptWriter } from './components/features/ScriptWriter.tsx';
 import { SceneImageManager } from './components/features/SceneImageManager.tsx';
@@ -92,12 +90,16 @@ const App: React.FC = () => {
         return <StoryIdeaGenerator 
           onIdeasGenerated={(k, i, g, f) => { setKeywords(k); setIdeas(i); setSelectedIdeaIds([]); }} 
           onProceedToScripting={() => { 
-            // For now, if multiple are selected, we just take the first one or combine them.
-            // Since the user wants to "make them episodes", we can pass the first one as the main story,
-            // or if it's a series concept, pass that.
             const s = ideas.find(x => x.id === selectedIdeaIds[0]); 
             if (s) { 
-              setStory(s); 
+              const storyWithChars = {
+                ...s,
+                proSettingsUsed: {
+                  ...proSettings,
+                  characters: proSettings.characters
+                }
+              };
+              setStory(storyWithChars);
               setActiveView(ActiveView.ScriptWriter); 
             } 
           }} 

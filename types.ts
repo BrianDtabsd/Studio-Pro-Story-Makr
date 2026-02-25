@@ -139,6 +139,7 @@ export interface ProStorySettings {
   productionProtocol: ProductionProtocol;
   videoBudget: number;
   realisticImages: boolean;
+  sourceFile?: { name: string; data: string; mimeType: string };
 }
 
 export interface StoryIdea {

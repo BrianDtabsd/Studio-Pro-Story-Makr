@@ -1,7 +1,7 @@
 
 import { GoogleGenAI, Modality, Type, GenerateContentResponse } from "@google/genai";
 import { GEMINI_TEXT_MODEL, GEMINI_IMAGE_MODEL, GEMINI_TTS_MODEL, GEMINI_VIDEO_MODEL, GEMINI_ANALYSIS_MODEL, PRESET_VOICES_CONFIG } from "../constants.ts";
-import { StoryIdea, ScriptType, VideoGenreId, VIDEO_GENRES, ProStorySettings, AIAnalyzedScript, CharacterVoicePreset, PresetVoiceKey } from "../types.ts"; 
+import { StoryIdea, ScriptType, VideoGenreId, VIDEO_GENRES, ProStorySettings, AIAnalyzedScript, CharacterVoicePreset, PresetVoiceKey } from "../types.ts";
 
 const getAIInstance = (): GoogleGenAI => {
   if (!process.env.API_KEY) {
@@ -19,7 +19,7 @@ export const generateStoryIdeas = async (
 ): Promise<StoryIdea[]> => {
   const ai = getAIInstance();
   const genreLabels = genres.map(g => VIDEO_GENRES.find(v => v.id === g)?.label).join(', ');
-  
+
   const prompt = `You are a professional story writer. 
     Format: ${videoStructure === 'episodic' ? `Series (generate exactly ${variationCount} episodes)` : `Standalone story (generate exactly ${variationCount} distinct variations)`}.
     Genres: ${genreLabels}.
@@ -49,7 +49,7 @@ export const generateScript = async (outline: string, scriptType: ScriptType, st
   const ai = getAIInstance();
   const pro = story?.proSettingsUsed;
   const scriptStyle = scriptType === ScriptType.SingleVoice ? "One Narrator only" : scriptType === ScriptType.TwoVoice ? "Conversation between two characters" : "Full ensemble dialogue";
-  
+
   const prompt = `Write a professional script for: ${outline}.
     Mode: ${scriptStyle}.
     Character Designs: ${pro?.characters.map(c => `${c.name} (${c.physicalDescription})`).join(', ')}.
@@ -66,8 +66,8 @@ export const analyzeScript = async (
   characterDefinitions: any[] = []
 ): Promise<AIAnalyzedScript> => {
   const ai = getAIInstance();
-  
-  const characterBible = characterDefinitions.map(c => 
+
+  const characterBible = characterDefinitions.map(c =>
     `- ${c.name}: ${c.physicalDescription} (${c.relationalStatus})`
   ).join('\n');
 
@@ -105,7 +105,7 @@ export const analyzeScript = async (
     contents: prompt,
     config: { responseMimeType: "application/json", temperature: 0.2 }
   });
-  
+
   return JSON.parse(response.text || "{}") as AIAnalyzedScript;
 };
 
@@ -127,11 +127,15 @@ export const generateSpeech = async (
   dialogueItems: Array<{ speaker: string, text: string }>,
   voicePresets: Record<string, CharacterVoicePreset>,
   defaultVoiceKey: PresetVoiceKey = 'Narrator_F'
-): Promise<string> => {
+): Promise<Blob> => {
   try {
     const ai = getAIInstance();
     const text = dialogueItems.map(d => `${d.speaker}: ${d.text}`).join('\n');
-    const voiceName = PRESET_VOICES_CONFIG[defaultVoiceKey]?.name || 'Aoede';
+
+    // Get appropriate voice for first speaker
+    const firstSpeaker = dialogueItems[0]?.speaker.toUpperCase() || '';
+    const voiceToUse = voicePresets[firstSpeaker]?.assignedVoiceKey || defaultVoiceKey;
+    const voiceName = PRESET_VOICES_CONFIG[voiceToUse]?.name || 'Aoede';
 
     const response = await ai.models.generateContent({
       model: GEMINI_TTS_MODEL,
@@ -144,7 +148,16 @@ export const generateSpeech = async (
 
     const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (!base64Audio) throw new Error("Audio synthesis empty.");
-    return `data:audio/mp3;base64,${base64Audio}`;
+
+    // Convert base64 to blob
+    const byteCharacters = atob(base64Audio);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: 'audio/wav' });
+
   } catch (err) {
     console.error(err);
     throw new Error("Voice engine failed.");
@@ -179,10 +192,10 @@ export const generateImageForPrompt = async (prompt: string, realistic: boolean 
 export const generateVideoForPrompt = async (prompt: string, res: '720p' | '1080p' = '1080p', img?: string): Promise<string> => {
   try {
     const ai = getAIInstance();
-    const payload: any = { 
-      model: GEMINI_VIDEO_MODEL, 
-      prompt, 
-      config: { numberOfVideos: 1, resolution: res, aspectRatio: '16:9' } 
+    const payload: any = {
+      model: GEMINI_VIDEO_MODEL,
+      prompt,
+      config: { numberOfVideos: 1, resolution: res, aspectRatio: '16:9' }
     };
     if (img) {
       const b64 = img.split(',')[1] || img;

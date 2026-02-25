@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { SectionCard } from '../SectionCard.tsx';
 import { ActionButton } from '../common/ActionButton.tsx';
 import { ErrorDisplay } from '../ErrorDisplay.tsx';
@@ -32,6 +32,8 @@ export const TextToSpeech: React.FC<Props> = ({
   const [synthesizing, setSynthesizing] = useState(false);
   const [chunks, setChunks] = useState<SynthesizedChunk[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [playingIndex, setPlayingIndex] = useState<number | null>(null);
+  const audioRefs = useRef<{ [key: number]: HTMLAudioElement | null }>({});
 
   const isMultiVoice = scriptType === ScriptType.MultiVoice || scriptType === ScriptType.TwoVoice;
 
@@ -62,22 +64,64 @@ export const TextToSpeech: React.FC<Props> = ({
     try {
       const newChunks: SynthesizedChunk[] = [];
       for (const scene of analyzedScript.scenes) {
-        const audioUrl = await generateSpeech(scene.dialogue, characterVoicePresets, defaultVoiceKey);
-        newChunks.push({ 
-          id: `s-${scene.sceneNumber}-${Date.now()}`, 
-          audioDataUrl: audioUrl, 
-          sceneNumbers: [scene.sceneNumber], 
-          downloadFilename: `scene_${scene.sceneNumber}.mp3` 
-        });
+        // Fix: Use generic voice passing with character voice presets mapped out properly inside geminiService
+        const audioBlob = await generateSpeech(scene.dialogue, characterVoicePresets, defaultVoiceKey);
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const chunk = {
+          id: `s-${scene.sceneNumber}-${Date.now()}`,
+          audioDataUrl: audioUrl,
+          sceneNumbers: [scene.sceneNumber],
+          downloadFilename: `scene_${scene.sceneNumber}.wav`
+        };
+        newChunks.push(chunk);
+        setChunks([...newChunks]); // Update incrementally
       }
-      setChunks(newChunks);
       onLoadAudioQueue(newChunks);
     } catch (e: any) {
+      console.error('Synthesis batch error:', e);
       setError("Synthesis batch failed.");
     } finally {
       setSynthesizing(false);
     }
   };
+
+  const handlePlayAll = () => {
+    if (chunks.length === 0) return;
+    setPlayingIndex(0);
+  };
+
+  useEffect(() => {
+    if (playingIndex !== null && playingIndex < chunks.length) {
+      const sceneNum = chunks[playingIndex].sceneNumbers[0];
+      const audioEl = audioRefs.current[sceneNum];
+
+      if (audioEl) {
+        // Ensure audio is loaded before playing
+        if (audioEl.readyState >= 2) { // HAVE_CURRENT_DATA or better
+          audioEl.play().catch(e => {
+            console.error("Audio play failed:", e);
+            setPlayingIndex(playingIndex + 1);
+          });
+        } else {
+          // Wait for audio to load
+          audioEl.addEventListener('canplay', () => {
+            audioEl.play().catch(e => {
+              console.error("Audio play failed:", e);
+              setPlayingIndex(playingIndex + 1);
+            });
+          }, { once: true });
+        }
+
+        audioEl.onended = () => {
+          setPlayingIndex(playingIndex + 1);
+        };
+      } else {
+        setPlayingIndex(playingIndex + 1);
+      }
+    } else if (playingIndex !== null && playingIndex >= chunks.length) {
+      setPlayingIndex(null);
+    }
+  }, [playingIndex, chunks]);
 
   return (
     <SectionCard title="Voice Production">
@@ -90,42 +134,50 @@ export const TextToSpeech: React.FC<Props> = ({
         <div className="space-y-10">
           <div className="neu-pressed p-6 rounded-2xl space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div>
-                    <label className="text-sm font-bold text-neu-text-dark mb-3 block">Main Narrator Voice</label>
-                    <select className="w-full neu-pressed text-neu-text-dark p-4 rounded-xl text-sm focus:outline-none focus:ring-0" value={defaultVoiceKey} onChange={e => onDefaultVoiceKeyChange(e.target.value as PresetVoiceKey)}>
-                        {PRESET_VOICE_KEYS_ORDERED.map(k => <option key={k} value={k}>{PRESET_VOICES_CONFIG[k].displayName}</option>)}
-                    </select>
+              <div>
+                <label className="text-sm font-bold text-neu-text-dark mb-3 block">Main Narrator Voice</label>
+                <select className="w-full neu-pressed text-neu-text-dark p-4 rounded-xl text-sm focus:outline-none focus:ring-0" value={defaultVoiceKey} onChange={e => onDefaultVoiceKeyChange(e.target.value as PresetVoiceKey)}>
+                  {PRESET_VOICE_KEYS_ORDERED.map(k => <option key={k} value={k}>{PRESET_VOICES_CONFIG[k].displayName}</option>)}
+                </select>
+              </div>
+              {isMultiVoice && (
+                <div className="space-y-4">
+                  <label className="text-sm font-bold text-neu-text-dark block">Character Overrides</label>
+                  <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar p-1">
+                    {analyzedScript.allCharacters.map(c => (
+                      <div key={c} className="flex items-center justify-between p-3 neu-flat rounded-xl">
+                        <span className="text-xs font-bold text-neu-text-dark uppercase">{c}</span>
+                        <select className="bg-transparent text-xs outline-none text-neu-text" value={characterVoicePresets[c.toUpperCase()]?.assignedVoiceKey || 'INHERIT'}
+                          onChange={e => onCharacterVoicePresetsChange((prev: any) => ({ ...prev, [c.toUpperCase()]: { assignedVoiceKey: e.target.value === 'INHERIT' ? null : e.target.value } }))}>
+                          <option value="INHERIT">Default</option>
+                          {PRESET_VOICE_KEYS_ORDERED.map(k => <option key={k} value={k}>{PRESET_VOICES_CONFIG[k].displayName}</option>)}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                {isMultiVoice && (
-                    <div className="space-y-4">
-                        <label className="text-sm font-bold text-neu-text-dark block">Character Overrides</label>
-                        <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar p-1">
-                            {analyzedScript.allCharacters.map(c => (
-                                <div key={c} className="flex items-center justify-between p-3 neu-flat rounded-xl">
-                                    <span className="text-xs font-bold text-neu-text-dark uppercase">{c}</span>
-                                    <select className="bg-transparent text-xs outline-none text-neu-text" value={characterVoicePresets[c.toUpperCase()]?.assignedVoiceKey || 'INHERIT'}
-                                        onChange={e => onCharacterVoicePresetsChange((prev: any) => ({ ...prev, [c.toUpperCase()]: { assignedVoiceKey: e.target.value === 'INHERIT' ? null : e.target.value } }))}>
-                                        <option value="INHERIT">Default</option>
-                                        {PRESET_VOICE_KEYS_ORDERED.map(k => <option key={k} value={k}>{PRESET_VOICES_CONFIG[k].displayName}</option>)}
-                                    </select>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
+              )}
             </div>
           </div>
 
           <div className="space-y-6">
             <div className="flex justify-between items-center px-2">
-                <h3 className="text-sm font-bold text-neu-text-dark uppercase">Generated Audio Clips</h3>
+              <h3 className="text-sm font-bold text-neu-text-dark uppercase">Generated Audio Clips</h3>
+              <div className="flex gap-3">
+                {chunks.length > 0 && (
+                  <ActionButton onClick={handlePlayAll} className="py-2 px-6 text-xs bg-accent-orange text-white">
+                    {playingIndex !== null ? 'PLAYING...' : 'PLAY ALL'}
+                  </ActionButton>
+                )}
                 <ActionButton onClick={handleSynthesizeAll} isLoading={synthesizing} className="py-2 px-6 text-xs">SYNTHESIZE ALL AUDIO</ActionButton>
+              </div>
             </div>
             <div className="grid grid-cols-1 gap-3">
               {analyzedScript.scenes.map(s => {
                 const chunk = chunks.find(c => c.sceneNumbers.includes(s.sceneNumber));
+                const isPlaying = playingIndex !== null && playingIndex < chunks.length && chunks[playingIndex].sceneNumbers.includes(s.sceneNumber);
                 return (
-                  <div key={s.sceneNumber} className="neu-flat p-4 rounded-xl flex items-center justify-between transition-all hover:scale-[1.01]">
+                  <div key={s.sceneNumber} className={`neu-flat p-4 rounded-xl flex items-center justify-between transition-all hover:scale-[1.01] ${isPlaying ? 'border-2 border-accent-orange' : ''}`}>
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-10 flex items-center justify-center neu-pressed rounded-lg text-xs font-black text-neu-text-dark">S{s.sceneNumber}</div>
                       <div>
@@ -134,13 +186,25 @@ export const TextToSpeech: React.FC<Props> = ({
                       </div>
                     </div>
                     {chunk ? (
-                        <div className="flex gap-2">
-                             <audio src={chunk.audioDataUrl} className="hidden" id={`audio-${s.sceneNumber}`} />
-                             <button onClick={() => (document.getElementById(`audio-${s.sceneNumber}`) as HTMLAudioElement)?.play()} className="neu-btn p-2 text-accent-orange font-bold">▶</button>
-                             <DownloadButton fileUrl={chunk.audioDataUrl} fileName={chunk.downloadFilename} buttonText="MP3" className="neu-btn text-xs py-1 px-4" />
-                        </div>
+                      <div className="flex gap-2">
+                        <audio
+                          ref={el => audioRefs.current[s.sceneNumber] = el}
+                          src={chunk.audioDataUrl}
+                          className="hidden"
+                        />
+                        <button onClick={() => {
+                          const audioEl = audioRefs.current[s.sceneNumber];
+                          if (audioEl) {
+                            audioEl.currentTime = 0;
+                            audioEl.play();
+                          }
+                        }} className="neu-btn p-2 text-accent-orange font-bold">▶</button>
+                        <DownloadButton fileUrl={chunk.audioDataUrl} fileName={chunk.downloadFilename} buttonText="WAV" className="neu-btn text-xs py-1 px-4" />
+                      </div>
                     ) : (
-                        <div className="text-xs text-neu-text font-bold uppercase">Pending...</div>
+                      <div className="text-xs text-neu-text font-bold uppercase">
+                        {synthesizing ? 'Pending...' : 'Not Generated'}
+                      </div>
                     )}
                   </div>
                 );
