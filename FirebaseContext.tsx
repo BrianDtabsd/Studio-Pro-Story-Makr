@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { auth, db, signInWithPopup, googleProvider, onAuthStateChanged, doc, getDoc, setDoc, collection, query, onSnapshot, deleteDoc, User } from './firebase';
 import { UserProfile, Project } from './types';
+import { deleteProjectAssets } from './services/storageService';
 
 interface FirebaseContextType {
   user: User | null;
@@ -29,13 +30,14 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         // Fetch or create profile
         const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
         if (userDoc.exists()) {
-          setProfile(userDoc.data() as UserProfile);
+          const data = userDoc.data();
+          setProfile({ ...data, isPro: data.plan === 'pro' } as UserProfile);
         } else {
           const newProfile: UserProfile = {
             username: firebaseUser.displayName || 'Anonymous',
             avatarSeed: Math.random().toString(36).substring(7),
             joinedDate: Date.now(),
-            isPro: localStorage.getItem('story_makr_force_pro') === 'true'
+            isPro: false
           };
           await setDoc(doc(db, 'users', firebaseUser.uid), newProfile);
           setProfile(newProfile);
@@ -72,7 +74,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const signOutUser = async () => {
     try {
       await auth.signOut();
-      localStorage.removeItem('story_makr_force_pro');
+
     } catch (error) {
       console.error("Sign out error:", error);
     }
@@ -90,6 +92,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const deleteProject = async (projectId: string) => {
     if (!user) return;
     try {
+      // Best-effort Storage cleanup — never blocks project deletion if it fails
+      await deleteProjectAssets(user.uid, projectId).catch(() => {});
       await deleteDoc(doc(db, 'users', user.uid, 'projects', projectId));
     } catch (error) {
       console.error("Firestore Error (DELETE project):", error);

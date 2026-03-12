@@ -13,16 +13,7 @@ import { ProjectExport } from './components/features/ProjectExport.tsx';
 import { InfoBar } from './components/InfoBar.tsx';
 import { ActionButton } from './components/common/ActionButton.tsx';
 import { FirebaseProvider, useFirebase } from './FirebaseContext';
-
-declare global {
-  interface AIStudio {
-    hasSelectedApiKey: () => Promise<boolean>;
-    openSelectKey: () => Promise<void>;
-  }
-  interface Window {
-    aistudio: AIStudio;
-  }
-}
+import { uploadImageAsset, uploadAudioAsset } from './services/storageService';
 
 const AppContent: React.FC = () => {
   const { user, profile, projects, loading: firebaseLoading, signIn, signOut, saveProject, deleteProject, upgradeToPro } = useFirebase();
@@ -52,6 +43,38 @@ const AppContent: React.FC = () => {
     audioChunks: {},
   });
 
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  // Strip raw binary assets before writing to Firestore.
+  // base64 data: URLs and ephemeral blob: URLs are replaced with empty string
+  // so they never cause a document size overflow. Storage URLs (https://) pass through.
+  const sanitizeStateForFirestore = (state: ProjectState): ProjectState => {
+    const cleanUrl = (url: string | undefined) =>
+      !url || url.startsWith('data:') || url.startsWith('blob:') ? '' : url;
+    return {
+      ...state,
+      simg_sceneImageDefinitions: Object.fromEntries(
+        Object.entries(state.simg_sceneImageDefinitions).map(([id, scenes]) => [
+          id, scenes.map(s => ({ ...s, generatedImageUrl: cleanUrl(s.generatedImageUrl), generatedVideoUrl: cleanUrl(s.generatedVideoUrl) }))
+        ])
+      ),
+      audioChunks: Object.fromEntries(
+        Object.entries(state.audioChunks).map(([id, chunks]) => [
+          id, chunks.map(c => ({ ...c, audioDataUrl: cleanUrl(c.audioDataUrl) }))
+        ])
+      ),
+      ffimg_generatedImages: state.ffimg_generatedImages.map(img => ({ ...img, src: cleanUrl(img.src) })),
+      tm_generatedThumbnail: state.tm_generatedThumbnail
+        ? { ...state.tm_generatedThumbnail, src: cleanUrl(state.tm_generatedThumbnail.src) }
+        : null,
+      tcg_titleCards: Object.fromEntries(
+        Object.entries(state.tcg_titleCards).map(([id, cards]) => [
+          id, cards.map(c => ({ ...c, src: cleanUrl(c.src) }))
+        ])
+      ),
+    };
+  };
+
   const [proSettings, setProSettings] = useState<ProStorySettings>({ 
     contentStyle: ContentStyle.Drama,
     topics: [],
@@ -65,13 +88,8 @@ const AppContent: React.FC = () => {
     realisticImages: false 
   });
 
-  const [hasVeoKey, setHasVeoKey] = useState(false);
-
-  useEffect(() => {
-    if (window.aistudio) {
-      window.aistudio.hasSelectedApiKey().then(setHasVeoKey);
-    }
-  }, []);
+  // Veo video generation is Phase 2 — images work now, video coming soon
+  const hasVeoKey = true;
 
   // Update isProUser when user changes
   useEffect(() => {
@@ -90,34 +108,95 @@ const AppContent: React.FC = () => {
     { id: ActiveView.ProjectExport, label: 'Export', icon: '📦' },
   ];
 
-  const handleOpenSelectKey = async () => {
-    await window.aistudio.openSelectKey();
-    setHasVeoKey(true);
-  };
-
   const handleUpgradeToPro = async () => {
     await upgradeToPro();
   };
 
-  // Auto-save project state
+  // Auto-save project state — debounced 2s after any state change.
+  // Sanitizes state before writing so base64/blob URLs never hit Firestore.
   useEffect(() => {
     const save = async () => {
-      if (user && projectState.storyForScripting) {
+      if (!user || !projectState.storyForScripting) return;
+      setSaveStatus('saving');
+      try {
         const project: Project = {
           id: projectState.storyForScripting.id,
           title: projectState.storyForScripting.title,
           description: projectState.storyForScripting.description,
           lastModified: Date.now(),
           progress: 50,
-          state: projectState
+          state: sanitizeStateForFirestore(projectState),
         };
         await saveProject(project);
+        setSaveStatus('saved');
+      } catch {
+        setSaveStatus('error');
       }
     };
-
-    const timeoutId = setTimeout(save, 2000); // Debounce save
+    const timeoutId = setTimeout(save, 2000);
     return () => clearTimeout(timeoutId);
   }, [projectState, user, saveProject]);
+
+  // Upload scene images to Storage immediately after generation.
+  // Optimistic: state updates instantly with base64 for UI, then updates again
+  // with the permanent Storage URL once upload completes.
+  const handleSceneImageDefinitionsChange = async (definitions: Record<string, SceneImageDefinition[]>) => {
+    setProjectState(prev => ({ ...prev, simg_sceneImageDefinitions: definitions }));
+    const projectId = projectState.storyForScripting?.id;
+    if (!user || !projectId) return;
+    const hasNewBase64 = Object.values(definitions).some(scenes =>
+      scenes.some(s => s.generatedImageUrl?.startsWith('data:'))
+    );
+    if (!hasNewBase64) return;
+    const uploaded = { ...definitions };
+    for (const [ideaId, scenes] of Object.entries(definitions)) {
+      uploaded[ideaId] = await Promise.all(scenes.map(async scene => {
+        if (scene.generatedImageUrl?.startsWith('data:')) {
+          try {
+            const url = await uploadImageAsset(user.uid, projectId, `scene_${ideaId}_${scene.sceneNumber}`, scene.generatedImageUrl);
+            return { ...scene, generatedImageUrl: url };
+          } catch { return scene; }
+        }
+        return scene;
+      }));
+    }
+    setProjectState(prev => ({ ...prev, simg_sceneImageDefinitions: uploaded }));
+  };
+
+  // Upload audio chunks to Storage immediately after generation.
+  const handleAudioChunksChange = async (chunks: Record<string, SynthesizedChunk[]>) => {
+    setProjectState(prev => ({ ...prev, audioChunks: chunks }));
+    const projectId = projectState.storyForScripting?.id;
+    if (!user || !projectId) return;
+    const hasNewAudio = Object.values(chunks).some(list =>
+      list.some(c => c.audioDataUrl?.startsWith('blob:') || c.audioDataUrl?.startsWith('data:'))
+    );
+    if (!hasNewAudio) return;
+    const uploaded = { ...chunks };
+    for (const [ideaId, list] of Object.entries(chunks)) {
+      uploaded[ideaId] = await Promise.all(list.map(async chunk => {
+        if (chunk.audioDataUrl?.startsWith('blob:') || chunk.audioDataUrl?.startsWith('data:')) {
+          try {
+            const url = await uploadAudioAsset(user.uid, projectId, chunk.id, chunk.audioDataUrl);
+            return { ...chunk, audioDataUrl: url };
+          } catch { return chunk; }
+        }
+        return chunk;
+      }));
+    }
+    setProjectState(prev => ({ ...prev, audioChunks: uploaded }));
+  };
+
+  // Upload thumbnail to Storage immediately after generation.
+  const handleThumbnailChange = async (thumbnail: GeneratedImage | null) => {
+    setProjectState(prev => ({ ...prev, tm_generatedThumbnail: thumbnail }));
+    const projectId = projectState.storyForScripting?.id;
+    if (!user || !projectId || !thumbnail?.src?.startsWith('data:')) return;
+    try {
+      const url = await uploadImageAsset(user.uid, projectId, 'thumbnail', thumbnail.src, 0.75);
+      setProjectState(prev => ({ ...prev, tm_generatedThumbnail: { ...thumbnail, src: url } }));
+    } catch { /* keep base64 in memory, sanitizer strips it from Firestore */ }
+  };
 
   const renderView = () => {
     if (firebaseLoading) return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
@@ -146,7 +225,7 @@ const AppContent: React.FC = () => {
           High-quality video generation (Veo) requires a paid project API key. 
           Please consult the <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener" className="text-xray-accent underline">billing documentation</a> for setup.
         </p>
-        <ActionButton onClick={handleOpenSelectKey}>Connect Paid Project</ActionButton>
+        <button onClick={() => {}} className="px-6 py-2 bg-orange-500 text-white rounded font-bold">Video Coming Soon (Phase 2)</button>
       </div>
     );
 
@@ -202,7 +281,7 @@ const AppContent: React.FC = () => {
           onDefaultVoiceKeyChange={(v) => setProjectState(prev => ({ ...prev, tts_defaultVoiceKey: v }))}
           characterVoicePresets={projectState.tts_characterVoicePresets}
           audioChunks={projectState.audioChunks}
-          onAudioChunksChange={(a) => setProjectState(prev => ({ ...prev, audioChunks: a }))}
+          onAudioChunksChange={handleAudioChunksChange}
           onNavigateToNextStep={() => setActiveView(ActiveView.SceneImages)}
         />;
       case ActiveView.SceneImages: 
@@ -212,7 +291,7 @@ const AppContent: React.FC = () => {
           scripts={projectState.sw_generatedScripts}
           editableScripts={projectState.tts_editableScripts}
           sceneImageDefinitions={projectState.simg_sceneImageDefinitions}
-          onSceneImageDefinitionsChange={(d) => setProjectState(prev => ({ ...prev, simg_sceneImageDefinitions: d }))}
+          onSceneImageDefinitionsChange={handleSceneImageDefinitionsChange}
           globalImageStylePrompt={projectState.simg_globalImageStylePrompt}
           onGlobalImageStylePromptChange={(s) => setProjectState(prev => ({ ...prev, simg_globalImageStylePrompt: s }))}
           onNavigateToNextStep={() => setActiveView(ActiveView.ProjectExport)}
@@ -223,8 +302,8 @@ const AppContent: React.FC = () => {
         return <ThumbnailMaker 
           initialPrompt={projectState.tm_prompt} 
           onPromptChange={(p) => setProjectState(prev => ({ ...prev, tm_prompt: p }))} 
-          initialThumbnail={projectState.tm_generatedThumbnail} 
-          onThumbnailChange={(t) => setProjectState(prev => ({ ...prev, tm_generatedThumbnail: t }))} 
+          initialThumbnail={projectState.tm_generatedThumbnail}
+          onThumbnailChange={handleThumbnailChange} 
           storyIdeaForTitle={projectState.storyForScripting} 
         />;
       case ActiveView.ProjectExport: 
@@ -270,6 +349,17 @@ const AppContent: React.FC = () => {
 
         {user && (
           <div className="flex items-center gap-4 mt-4 md:mt-0">
+            {projectState.storyForScripting && (
+              <span className={`text-[10px] font-bold uppercase tracking-widest transition-all ${
+                saveStatus === 'saving' ? 'text-amber-500 animate-pulse' :
+                saveStatus === 'saved'  ? 'text-emerald-500' :
+                saveStatus === 'error'  ? 'text-red-500' : 'text-neu-text opacity-30'
+              }`}>
+                {saveStatus === 'saving' ? '● Saving...' :
+                 saveStatus === 'saved'  ? '✓ Saved' :
+                 saveStatus === 'error'  ? '✕ Save failed' : '● Unsaved'}
+              </span>
+            )}
             <span className="text-sm font-bold text-neu-text-dark">{profile?.username}</span>
             <button onClick={signOut} className="neu-btn px-4 py-1 text-xs font-bold text-neu-text hover:text-red-500">Sign Out</button>
           </div>
