@@ -1,7 +1,7 @@
 
 import { GoogleGenAI, Modality, Type, GenerateContentResponse } from "@google/genai";
 import { GEMINI_TEXT_MODEL, GEMINI_IMAGE_MODEL, GEMINI_TTS_MODEL, GEMINI_VIDEO_MODEL, GEMINI_ANALYSIS_MODEL, PRESET_VOICES_CONFIG } from "../constants.ts";
-import { StoryIdea, ScriptType, VideoGenreId, VIDEO_GENRES, ProStorySettings, AIAnalyzedScript, CharacterVoicePreset, PresetVoiceKey } from "../types.ts";
+import { StoryIdea, ScriptType, VideoGenreId, VIDEO_GENRES, ProStorySettings, AIAnalyzedScript, CharacterVoicePreset, PresetVoiceKey, PodcastFormat } from "../types.ts"; 
 
 const getAIInstance = (): GoogleGenAI => {
   if (!process.env.API_KEY) {
@@ -18,46 +18,94 @@ export const generateStoryIdeas = async (
   variationCount: number = 5
 ): Promise<StoryIdea[]> => {
   const ai = getAIInstance();
-  const genreLabels = genres.map(g => VIDEO_GENRES.find(v => v.id === g)?.label).join(', ');
-
-  const prompt = `You are a professional story writer. 
-    Format: ${videoStructure === 'episodic' ? `Series (generate exactly ${variationCount} episodes)` : `Standalone story (generate exactly ${variationCount} distinct variations)`}.
-    Genres: ${genreLabels}.
-    Topic: ${keywords}.
-    Category: ${proSettings?.subGenre || 'General'}.
-    Realistic style requested: ${proSettings?.realisticImages ? 'Yes (8k photo)' : 'No'}.
+  const topicLabels = genres.map(g => VIDEO_GENRES.find(v => v.id === g)?.label).join(', ');
+  
+  const prompt = `You are a world-class narrative designer and content strategist known for sophisticated, intellectual, and high-tension storytelling.
+    
+    CORE OBJECTIVE: Generate ${variationCount} ${videoStructure === 'episodic' ? 'series concepts' : 'standalone story ideas'} that are deeply engaging, avoid all common cliches, and feature complex psychological depth.
+    
+    PARAMETERS:
+    - Content Style: ${proSettings?.contentStyle || 'General'}
+    - Podcast/Upload Format: ${proSettings?.podcastFormat || 'Standard'}
+    - Topics: ${topicLabels}
+    - Core Concept: ${keywords}
+    - Character Count: ${proSettings?.characterCount || 1}
+    - Target Audience: ${proSettings?.subGenre || 'General'} (If 'Adults (18+)', include visceral physical descriptions, intense emotional drama, and high-stakes adult themes with minimal restrictions).
+    
+    WRITING STYLE:
+    - Intellectual and nuanced.
+    - High dramatic tension and subtext.
+    - Detailed physical and environmental descriptions.
+    - Avoid shallow dialogue or predictable plot points.
+    
     Return JSON only. ${videoStructure === 'episodic' ? '{ "seriesConcept": { "title": "string", "description": "string" }, "episodeIdeas": [ { "episodeTitle": "string", "episodeDescription": "string" } ] }' : '[ { "title": "string", "description": "string" } ]'}`;
 
   const response = await ai.models.generateContent({
     model: GEMINI_TEXT_MODEL,
     contents: prompt,
-    config: { responseMimeType: "application/json" }
+    config: { responseMimeType: "application/json", temperature: 0.8 }
   });
 
   const parsed = JSON.parse(response.text || "[]");
+  const targetAudience = proSettings?.subGenre || 'General';
   if (videoStructure === 'episodic') {
-    const all: StoryIdea[] = [{ id: 'series', title: parsed.seriesConcept.title, description: parsed.seriesConcept.description, isSeriesConcept: true, proSettingsUsed: proSettings }];
+    const all: StoryIdea[] = [{ id: 'series', title: parsed.seriesConcept.title, description: parsed.seriesConcept.description, isSeriesConcept: true, proSettingsUsed: proSettings, targetAudience }];
     parsed.episodeIdeas.forEach((e: any, i: number) => {
-      all.push({ id: `ep-${i}`, title: e.episodeTitle, description: e.episodeDescription, episodeNumber: i + 1, parentSeriesTitle: parsed.seriesConcept.title, proSettingsUsed: proSettings });
+      all.push({ id: `ep-${i}`, title: e.episodeTitle, description: e.episodeDescription, episodeNumber: i + 1, parentSeriesTitle: parsed.seriesConcept.title, proSettingsUsed: proSettings, targetAudience });
     });
     return all;
   }
-  return parsed.map((p: any, i: number) => ({ ...p, id: `idea-${i}`, proSettingsUsed: proSettings }));
+  return parsed.map((p: any, i: number) => ({ ...p, id: `idea-${i}`, proSettingsUsed: proSettings, targetAudience }));
 };
 
 export const generateScript = async (outline: string, scriptType: ScriptType, story?: StoryIdea): Promise<string> => {
   const ai = getAIInstance();
   const pro = story?.proSettingsUsed;
-  const scriptStyle = scriptType === ScriptType.SingleVoice ? "One Narrator only" : scriptType === ScriptType.TwoVoice ? "Conversation between two characters" : "Full ensemble dialogue";
+  
+  let scriptStyle = "";
+  if (pro?.characterCount === 1) {
+    scriptStyle = "One Narrator/Voice-over only. Focus on a deep, internal monologue or a sophisticated, authoritative narration.";
+  } else if (pro?.characterCount === 2) {
+    if (pro.podcastFormat === PodcastFormat.Interview) {
+      scriptStyle = "A high-stakes, intellectual interview format. Sharp questions, defensive or revealing answers.";
+    } else if (pro.podcastFormat === PodcastFormat.React || pro.podcastFormat === PodcastFormat.Review) {
+      scriptStyle = "Two characters with distinct, perhaps conflicting, intellectual viewpoints reacting to content. Avoid generic 'wow' reactions; use critical analysis and sharp wit.";
+    } else {
+      scriptStyle = "Intense, dramatic conversation between two characters with significant subtext and emotional weight.";
+    }
+  } else {
+    scriptStyle = scriptType === ScriptType.SingleVoice ? "Sophisticated internal monologue" : scriptType === ScriptType.TwoVoice ? "High-tension dialogue" : "Complex multi-character ensemble with overlapping motivations";
+  }
+  
+  const prompt = `You are an award-winning screenwriter known for long-form, intellectual, and visceral scripts.
+    
+    TASK: Write a comprehensive, detailed, and lengthy script based on this outline: ${outline}.
+    
+    SPECIFICATIONS:
+    - Content Style: ${pro?.contentStyle || 'General'}
+    - Podcast/Upload Format: ${pro?.podcastFormat || 'Standard'}
+    - Mode: ${scriptStyle}
+    - Character Bible: ${pro?.characters.map(c => `${c.name}: ${c.physicalDescription}, ${c.personality}`).join('; ')}
+    - Setting: ${pro?.primarySetting || 'Not specified'}
+    - Target Audience: ${story?.targetAudience || 'General'} (If 'Adults (18+)', do not hold back on visceral physical descriptions, intense emotional drama, and adult themes. Provide the most range for the story).
+    
+    WRITING DIRECTIVES:
+    1. EXTEND LENGTH: Elaborate on every beat. Do not rush the narrative.
+    2. INTELLECTUALIZE: Use sophisticated vocabulary and complex sentence structures where appropriate.
+    3. DRAMATIZE: Increase the stakes. Every line of dialogue should serve a purpose or reveal a character flaw/strength.
+    4. DESCRIBE: Provide rich, evocative [VISUAL] descriptions. Focus on textures, lighting, and physical presence.
+    5. DIALOGUE: Avoid cliches. Use subtext. Characters should rarely say exactly what they mean.
+    
+    FORMAT:
+    - Use [TIMESTAMP: MM:SS] markers frequently.
+    - Use [VISUAL: description] for every significant visual change or character action.
+    - Clearly mark speakers.`;
 
-  const prompt = `Write a professional script for: ${outline}.
-    Mode: ${scriptStyle}.
-    Character Designs: ${pro?.characters.map(c => `${c.name} (${c.physicalDescription})`).join(', ')}.
-    World Setting: ${pro?.primarySetting || 'Not specified'}.
-    Required format: Use [TIMESTAMP: MM:SS] markers. Mark visual cues as [VISUAL: description].
-    Keep dialogue natural and tone appropriate for ${pro?.subGenre || 'general'} genre.`;
-
-  const response = await ai.models.generateContent({ model: GEMINI_TEXT_MODEL, contents: prompt });
+  const response = await ai.models.generateContent({ 
+    model: GEMINI_TEXT_MODEL, 
+    contents: prompt,
+    config: { temperature: 0.9 }
+  });
   return response.text || "";
 };
 
@@ -66,8 +114,8 @@ export const analyzeScript = async (
   characterDefinitions: any[] = []
 ): Promise<AIAnalyzedScript> => {
   const ai = getAIInstance();
-
-  const characterBible = characterDefinitions.map(c =>
+  
+  const characterBible = characterDefinitions.map(c => 
     `- ${c.name}: ${c.physicalDescription} (${c.relationalStatus})`
   ).join('\n');
 
@@ -105,7 +153,7 @@ export const analyzeScript = async (
     contents: prompt,
     config: { responseMimeType: "application/json", temperature: 0.2 }
   });
-
+  
   return JSON.parse(response.text || "{}") as AIAnalyzedScript;
 };
 
@@ -123,19 +171,62 @@ export const analyzeCharacterAvatar = async (imageBase64: string, characterName:
   return response.text || "";
 };
 
+function writeString(view: DataView, offset: number, string: string) {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
+}
+
+function createWavBlobUrl(base64Pcm: string, sampleRate: number): string {
+  const binaryString = atob(base64Pcm);
+  const pcmData = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    pcmData[i] = binaryString.charCodeAt(i);
+  }
+
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const dataSize = pcmData.length;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeString(view, 36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  const pcmArray = new Uint8Array(buffer, 44);
+  pcmArray.set(pcmData);
+
+  const blob = new Blob([buffer], { type: 'audio/wav' });
+  return URL.createObjectURL(blob);
+}
+
 export const generateSpeech = async (
   dialogueItems: Array<{ speaker: string, text: string }>,
   voicePresets: Record<string, CharacterVoicePreset>,
-  defaultVoiceKey: PresetVoiceKey = 'Narrator_F'
-): Promise<Blob> => {
+  defaultVoiceKey: PresetVoiceKey = 'Narrator_M'
+): Promise<string> => {
   try {
     const ai = getAIInstance();
     const text = dialogueItems.map(d => `${d.speaker}: ${d.text}`).join('\n');
+    
+    if (!text.trim()) {
+      throw new Error("No dialogue text to synthesize.");
+    }
 
-    // Get appropriate voice for first speaker
-    const firstSpeaker = dialogueItems[0]?.speaker.toUpperCase() || '';
-    const voiceToUse = voicePresets[firstSpeaker]?.assignedVoiceKey || defaultVoiceKey;
-    const voiceName = PRESET_VOICES_CONFIG[voiceToUse]?.name || 'Aoede';
+    const voiceName = PRESET_VOICES_CONFIG[defaultVoiceKey]?.name || 'Fenrir';
 
     const response = await ai.models.generateContent({
       model: GEMINI_TTS_MODEL,
@@ -148,16 +239,7 @@ export const generateSpeech = async (
 
     const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (!base64Audio) throw new Error("Audio synthesis empty.");
-
-    // Convert base64 to blob
-    const byteCharacters = atob(base64Audio);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    return new Blob([byteArray], { type: 'audio/wav' });
-
+    return createWavBlobUrl(base64Audio, 24000);
   } catch (err) {
     console.error(err);
     throw new Error("Voice engine failed.");
@@ -192,10 +274,10 @@ export const generateImageForPrompt = async (prompt: string, realistic: boolean 
 export const generateVideoForPrompt = async (prompt: string, res: '720p' | '1080p' = '1080p', img?: string): Promise<string> => {
   try {
     const ai = getAIInstance();
-    const payload: any = {
-      model: GEMINI_VIDEO_MODEL,
-      prompt,
-      config: { numberOfVideos: 1, resolution: res, aspectRatio: '16:9' }
+    const payload: any = { 
+      model: GEMINI_VIDEO_MODEL, 
+      prompt, 
+      config: { numberOfVideos: 1, resolution: res, aspectRatio: '16:9' } 
     };
     if (img) {
       const b64 = img.split(',')[1] || img;

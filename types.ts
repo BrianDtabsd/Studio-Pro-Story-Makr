@@ -23,6 +23,7 @@ export interface UserProfile {
   username: string;
   avatarSeed: string;
   joinedDate: number;
+  isPro?: boolean;
 }
 
 export interface Project {
@@ -40,24 +41,23 @@ export interface ProjectState {
   storyIdeasKeywords: string;
   generatedStoryIdeas: StoryIdea[];
   selectedIdeaIds: string[];
-  si_proSettingsEnabled: boolean;
-  si_proSettings: ProStorySettings;
+  isProUser: boolean;
   storyForScripting: StoryIdea | null;
-  sw_scriptOutline: string;
-  sw_generatedScript: string;
-  sw_episodeScripts: Record<string, string>; 
+  sw_scriptOutlines: Record<string, string>; // Map of ideaId -> outline
+  sw_generatedScripts: Record<string, string>; // Map of ideaId -> script
   sw_selectedScriptType: ScriptType;
-  simg_sceneImageDefinitions: SceneImageDefinition[];
+  simg_sceneImageDefinitions: Record<string, SceneImageDefinition[]>; // Map of ideaId -> scenes
   simg_globalImageStylePrompt: string;
-  tts_editableScript: string;
+  tts_editableScripts: Record<string, string>; // Map of ideaId -> script
   tts_defaultVoiceKey: PresetVoiceKey;
   tts_characterVoicePresets: Record<string, CharacterVoicePreset>;
-  tcg_titleCards: TitleCardData[];
+  tcg_titleCards: Record<string, TitleCardData[]>; // Map of ideaId -> titles
   ffimg_prompt: string;
   ffimg_generatedImages: GeneratedImage[];
   tm_prompt: string;
   tm_generatedThumbnail: GeneratedImage | null;
-  analyzedScriptData: AIAnalyzedScript | null;
+  analyzedScriptData: Record<string, AIAnalyzedScript | null>; // Map of ideaId -> analysis
+  audioChunks: Record<string, SynthesizedChunk[]>; // Map of ideaId -> audio
 }
 
 export interface NavItem {
@@ -104,16 +104,38 @@ export interface SceneImageDefinition {
 }
 
 export const VIDEO_GENRES = [
-  { id: 'explainer_how_to', label: 'Instructional' },
-  { id: 'edutainment', label: 'Educational' },
-  { id: 'storytelling_narrative', label: 'Storytelling' },
-  { id: 'true_crime_mysteries', label: 'True Crime' },
-  { id: 'podcast_style_video', label: 'Podcast' },
-  { id: 'comedy_skit', label: 'Comedy' },
-  { id: 'documentary_short', label: 'Documentary' },
+  { id: 'sci_fi', label: 'Sci-Fi' },
+  { id: 'explainer', label: 'Explainer' },
+  { id: 'instructional', label: 'Instructional' },
+  { id: 'educational', label: 'Educational' },
+  { id: 'true_crime', label: 'True Crime' },
+  { id: 'mystery', label: 'Mystery' },
+  { id: 'fantasy', label: 'Fantasy' },
+  { id: 'horror', label: 'Horror' },
+  { id: 'romance', label: 'Romance' },
+  { id: 'adventure', label: 'Adventure' },
+  { id: 'tech', label: 'Tech' },
+  { id: 'wellness', label: 'Wellness' },
+  { id: 'business', label: 'Business' },
+  { id: 'sports', label: 'Sports' },
+  { id: 'gaming', label: 'Video Games' },
 ] as const;
 
 export type VideoGenreId = typeof VIDEO_GENRES[number]['id'];
+
+export enum ContentStyle {
+  Comedy = 'Comedy',
+  Drama = 'Drama',
+  Documentary = 'Documentary',
+  Reality = 'Reality',
+}
+
+export enum PodcastFormat {
+  Recap = 'Recap',
+  Review = 'Review',
+  React = 'React',
+  Interview = 'Interview',
+}
 
 export const STORY_SUB_GENRES = [
   { id: 'unselected', label: 'Select Category...' },
@@ -128,14 +150,14 @@ export const STORY_SUB_GENRES = [
 export type StorySubGenreId = typeof STORY_SUB_GENRES[number]['id'];
 
 export interface ProStorySettings {
+  contentStyle: ContentStyle;
+  topics: VideoGenreId[];
+  podcastFormat?: PodcastFormat;
+  characterCount: 1 | 2;
   subGenre: StorySubGenreId;
   characters: CharacterDefinition[];
   primarySetting: string; 
   incitingIncidentIdea: string; 
-  explicitnessLevel: string;
-  aPlot?: string; 
-  bPlot?: string; 
-  cPlot?: string; 
   productionProtocol: ProductionProtocol;
   videoBudget: number;
   realisticImages: boolean;
@@ -154,6 +176,8 @@ export interface StoryIdea {
   isSeriesConcept?: boolean;
   parentSeriesTitle?: string;
   episodeNumber?: number;
+  videoGenreId?: VideoGenreId;
+  targetAudience?: string;
 }
 
 export enum ScriptType {

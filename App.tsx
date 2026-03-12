@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { ActiveView, NavItem, StoryIdea, ScriptType, VideoGenreId, GeneratedImage, CharacterVoicePreset, ProStorySettings, STORY_SUB_GENRES, PresetVoiceKey, SceneImageDefinition, AIAnalyzedScript, TitleCardData, UserProfile, Project, ProjectState, ProductionProtocol } from './types.ts';
+import { ActiveView, NavItem, StoryIdea, ScriptType, VideoGenreId, GeneratedImage, CharacterVoicePreset, ProStorySettings, STORY_SUB_GENRES, PresetVoiceKey, SceneImageDefinition, AIAnalyzedScript, TitleCardData, UserProfile, Project, ProjectState, ProductionProtocol, SynthesizedChunk, ContentStyle } from './types.ts';
 import { StoryIdeaGenerator } from './components/features/StoryIdeaGenerator.tsx';
 import { ScriptWriter } from './components/features/ScriptWriter.tsx';
 import { SceneImageManager } from './components/features/SceneImageManager.tsx';
@@ -12,6 +12,7 @@ import { ProfileManager } from './components/features/ProfileManager.tsx';
 import { ProjectExport } from './components/features/ProjectExport.tsx';
 import { InfoBar } from './components/InfoBar.tsx';
 import { ActionButton } from './components/common/ActionButton.tsx';
+import { FirebaseProvider, useFirebase } from './FirebaseContext';
 
 declare global {
   interface AIStudio {
@@ -19,34 +20,51 @@ declare global {
     openSelectKey: () => Promise<void>;
   }
   interface Window {
-    /* FIX: Removed readonly to ensure compatibility with other declarations of aistudio during interface merging. */
     aistudio: AIStudio;
   }
 }
 
-const App: React.FC = () => {
-  const [user, setUser] = useState<UserProfile | null>(null);
+const AppContent: React.FC = () => {
+  const { user, profile, projects, loading: firebaseLoading, signIn, signOut, saveProject, deleteProject, upgradeToPro } = useFirebase();
   const [activeView, setActiveView] = useState<ActiveView>(ActiveView.Hub);
-  const [keywords, setKeywords] = useState(''); 
-  const [ideas, setIdeas] = useState<StoryIdea[]>([]);
-  const [selectedIdeaIds, setSelectedIdeaIds] = useState<string[]>([]);
-  const [proEnabled, setProEnabled] = useState(false);
-  const [proSettings, setProSettings] = useState<ProStorySettings>({ subGenre: STORY_SUB_GENRES[0].id, characters: [], primarySetting: '', incitingIncidentIdea: '', explicitnessLevel: 'General', productionProtocol: ProductionProtocol.Cinematic, videoBudget: 3, realisticImages: false });
-  const [story, setStory] = useState<StoryIdea | null>(null);
-  const [outline, setOutline] = useState('');
-  const [script, setScript] = useState('');
-  const [scriptType, setScriptType] = useState<ScriptType>(ScriptType.SingleVoice);
-  const [sceneDefs, setSceneDefs] = useState<SceneImageDefinition[]>([]);
-  const [stylePrompt, setStylePrompt] = useState('');
-  const [editableScript, setEditableScript] = useState('');
-  const [defaultVoice, setDefaultVoice] = useState<PresetVoiceKey>('Narrator_F');
-  const [charVoices, setCharVoices] = useState<Record<string, CharacterVoicePreset>>({});
-  const [titles, setTitles] = useState<TitleCardData[]>([]);
-  const [ffPrompt, setFfPrompt] = useState('');
-  const [ffImages, setFfImages] = useState<GeneratedImage[]>([]);
-  const [tmPrompt, setTmPrompt] = useState('');
-  const [thumbnail, setThumbnail] = useState<GeneratedImage | null>(null);
-  const [analyzedScriptData, setAnalyzedScriptData] = useState<AIAnalyzedScript | null>(null);
+  
+  const [projectState, setProjectState] = useState<ProjectState>({
+    activeView: ActiveView.Hub,
+    storyIdeasKeywords: '',
+    generatedStoryIdeas: [],
+    selectedIdeaIds: [],
+    isProUser: false,
+    storyForScripting: null,
+    sw_scriptOutlines: {},
+    sw_generatedScripts: {},
+    sw_selectedScriptType: ScriptType.SingleVoice,
+    simg_sceneImageDefinitions: {},
+    simg_globalImageStylePrompt: 'Cinematic, high-detail, dramatic lighting, 8k resolution',
+    tts_editableScripts: {},
+    tts_defaultVoiceKey: 'Narrator_M',
+    tts_characterVoicePresets: {},
+    tcg_titleCards: {},
+    ffimg_prompt: '',
+    ffimg_generatedImages: [],
+    tm_prompt: '',
+    tm_generatedThumbnail: null,
+    analyzedScriptData: {},
+    audioChunks: {},
+  });
+
+  const [proSettings, setProSettings] = useState<ProStorySettings>({ 
+    contentStyle: ContentStyle.Drama,
+    topics: [],
+    characterCount: 1,
+    subGenre: STORY_SUB_GENRES[0].id, 
+    characters: [], 
+    primarySetting: '', 
+    incitingIncidentIdea: '', 
+    productionProtocol: ProductionProtocol.Cinematic, 
+    videoBudget: 3, 
+    realisticImages: false 
+  });
+
   const [hasVeoKey, setHasVeoKey] = useState(false);
 
   useEffect(() => {
@@ -54,6 +72,13 @@ const App: React.FC = () => {
       window.aistudio.hasSelectedApiKey().then(setHasVeoKey);
     }
   }, []);
+
+  // Update isProUser when user changes
+  useEffect(() => {
+    if (profile) {
+      setProjectState(prev => ({ ...prev, isProUser: !!profile.isPro }));
+    }
+  }, [profile]);
 
   const navItems: NavItem[] = [
     { id: ActiveView.Hub, label: 'Projects', icon: '📁' },
@@ -70,8 +95,48 @@ const App: React.FC = () => {
     setHasVeoKey(true);
   };
 
+  const handleUpgradeToPro = async () => {
+    await upgradeToPro();
+  };
+
+  // Auto-save project state
+  useEffect(() => {
+    const save = async () => {
+      if (user && projectState.storyForScripting) {
+        const project: Project = {
+          id: projectState.storyForScripting.id,
+          title: projectState.storyForScripting.title,
+          description: projectState.storyForScripting.description,
+          lastModified: Date.now(),
+          progress: 50,
+          state: projectState
+        };
+        await saveProject(project);
+      }
+    };
+
+    const timeoutId = setTimeout(save, 2000); // Debounce save
+    return () => clearTimeout(timeoutId);
+  }, [projectState, user, saveProject]);
+
   const renderView = () => {
-    if (!user || activeView === ActiveView.Hub) return <ProfileManager currentUser={user} projects={[]} onSignIn={u => setUser({ username: u, avatarSeed: '1', joinedDate: Date.now() })} onSignOut={() => setUser(null)} onCreateProject={() => setActiveView(ActiveView.StoryIdeas)} onLoadProject={() => {}} onDeleteProject={() => {}} />;
+    if (firebaseLoading) return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
+
+    if (!user || activeView === ActiveView.Hub) return (
+      <ProfileManager 
+        currentUser={profile} 
+        projects={projects} 
+        onSignIn={signIn} 
+        onSignOut={signOut} 
+        onUpgradeToPro={handleUpgradeToPro}
+        onCreateProject={() => setActiveView(ActiveView.StoryIdeas)} 
+        onLoadProject={(p) => {
+          setProjectState(p.state);
+          setActiveView(p.state.activeView || ActiveView.StoryIdeas);
+        }} 
+        onDeleteProject={deleteProject} 
+      />
+    );
     
     // Video view needs a billing check
     if (activeView === ActiveView.SceneImages && !hasVeoKey) return (
@@ -85,66 +150,95 @@ const App: React.FC = () => {
       </div>
     );
 
+    const selectedEpisodes = projectState.generatedStoryIdeas.filter(i => projectState.selectedIdeaIds.includes(i.id) && !i.isSeriesConcept);
+
     switch (activeView) {
       case ActiveView.StoryIdeas: 
         return <StoryIdeaGenerator 
-          onIdeasGenerated={(k, i, g, f) => { setKeywords(k); setIdeas(i); setSelectedIdeaIds([]); }} 
+          onIdeasGenerated={(k, i) => { 
+            setProjectState(prev => ({ 
+              ...prev, 
+              storyIdeasKeywords: k, 
+              generatedStoryIdeas: i, 
+              selectedIdeaIds: [] 
+            })); 
+          }} 
           onProceedToScripting={() => { 
-            const s = ideas.find(x => x.id === selectedIdeaIds[0]); 
+            const s = projectState.generatedStoryIdeas.find(x => x.id === projectState.selectedIdeaIds[0]); 
             if (s) { 
-              const storyWithChars = {
-                ...s,
-                proSettingsUsed: {
-                  ...proSettings,
-                  characters: proSettings.characters
-                }
-              };
-              setStory(storyWithChars);
+              setProjectState(prev => ({ ...prev, storyForScripting: s }));
               setActiveView(ActiveView.ScriptWriter); 
             } 
           }} 
-          currentKeywords={keywords} currentIdeas={ideas} selectedIdeaIds={selectedIdeaIds} setSelectedIdeaIds={setSelectedIdeaIds} 
-          proSettingsEnabled={proEnabled} onProSettingsEnabledChange={setProEnabled} 
-          proSettings={proSettings} onProSettingsChange={setProSettings} 
-          onCharacterVoicePresetsChange={setCharVoices} 
+          currentKeywords={projectState.storyIdeasKeywords} 
+          currentIdeas={projectState.generatedStoryIdeas} 
+          selectedIdeaIds={projectState.selectedIdeaIds} 
+          setSelectedIdeaIds={(ids) => setProjectState(prev => ({ ...prev, selectedIdeaIds: typeof ids === 'function' ? ids(prev.selectedIdeaIds) : ids }))} 
+          isProUser={projectState.isProUser}
+          proSettings={proSettings} 
+          onProSettingsChange={setProSettings} 
+          onCharacterVoicePresetsChange={(v) => setProjectState(prev => ({ ...prev, tts_characterVoicePresets: v }))} 
         />;
       case ActiveView.ScriptWriter: 
         return <ScriptWriter 
-          story={story} initialOutline={outline} onOutlineChange={setOutline} 
-          initialScript={script} onScriptChange={s => { setScript(s); setEditableScript(s); setAnalyzedScriptData(null); }} 
-          initialScriptType={scriptType} onScriptTypeChange={setScriptType} 
+          story={projectState.storyForScripting} 
+          selectedEpisodes={selectedEpisodes}
+          outlines={projectState.sw_scriptOutlines} 
+          onOutlinesChange={(o) => setProjectState(prev => ({ ...prev, sw_scriptOutlines: o }))} 
+          scripts={projectState.sw_generatedScripts} 
+          onScriptsChange={(s) => setProjectState(prev => ({ ...prev, sw_generatedScripts: s }))} 
+          initialScriptType={projectState.sw_selectedScriptType} 
+          onScriptTypeChange={(t) => setProjectState(prev => ({ ...prev, sw_selectedScriptType: t }))} 
           onNavigateToNextStep={() => setActiveView(ActiveView.TextToSpeech)} 
         />;
-      case ActiveView.TextToSpeech: 
+      case ActiveView.TextToSpeech:
         return <TextToSpeech 
-          scriptText={editableScript} 
-          defaultVoiceKey={defaultVoice} onDefaultVoiceKeyChange={setDefaultVoice} 
-          characterVoicePresets={charVoices} onCharacterVoicePresetsChange={setCharVoices} 
-          onNavigateToSceneImageSetup={() => setActiveView(ActiveView.SceneImages)} 
-          onLoadAudioQueue={() => {}} 
-          scriptType={scriptType}
-          analyzedScript={analyzedScriptData}
-          onAnalyzedScriptChange={setAnalyzedScriptData}
-          storyIdea={story}
+          story={projectState.storyForScripting}
+          selectedEpisodes={selectedEpisodes}
+          scripts={projectState.sw_generatedScripts}
+          editableScripts={projectState.tts_editableScripts}
+          onEditableScriptsChange={(s) => setProjectState(prev => ({ ...prev, tts_editableScripts: s }))}
+          defaultVoiceKey={projectState.tts_defaultVoiceKey}
+          onDefaultVoiceKeyChange={(v) => setProjectState(prev => ({ ...prev, tts_defaultVoiceKey: v }))}
+          characterVoicePresets={projectState.tts_characterVoicePresets}
+          audioChunks={projectState.audioChunks}
+          onAudioChunksChange={(a) => setProjectState(prev => ({ ...prev, audioChunks: a }))}
+          onNavigateToNextStep={() => setActiveView(ActiveView.SceneImages)}
         />;
       case ActiveView.SceneImages: 
         return <SceneImageManager 
-          scriptText={editableScript} 
-          sceneImageDefinitions={sceneDefs} onSceneImageDefinitionsChange={setSceneDefs} 
-          globalImageStylePrompt={stylePrompt} onGlobalImageStylePromptChange={setStylePrompt} 
-          onNavigateToNextStep={() => setActiveView(ActiveView.ProjectExport)} 
-          storyIdea={story}
-          analyzedScript={analyzedScriptData}
-          onAnalyzedScriptChange={setAnalyzedScriptData}
+          story={projectState.storyForScripting}
+          selectedEpisodes={selectedEpisodes}
+          scripts={projectState.sw_generatedScripts}
+          editableScripts={projectState.tts_editableScripts}
+          sceneImageDefinitions={projectState.simg_sceneImageDefinitions}
+          onSceneImageDefinitionsChange={(d) => setProjectState(prev => ({ ...prev, simg_sceneImageDefinitions: d }))}
+          globalImageStylePrompt={projectState.simg_globalImageStylePrompt}
+          onGlobalImageStylePromptChange={(s) => setProjectState(prev => ({ ...prev, simg_globalImageStylePrompt: s }))}
+          onNavigateToNextStep={() => setActiveView(ActiveView.ProjectExport)}
+          analyzedScripts={projectState.analyzedScriptData}
+          onAnalyzedScriptsChange={(s) => setProjectState(prev => ({ ...prev, analyzedScriptData: s }))}
         />;
       case ActiveView.ThumbnailMaker: 
         return <ThumbnailMaker 
-          initialPrompt={tmPrompt} onPromptChange={setTmPrompt} 
-          initialThumbnail={thumbnail} onThumbnailChange={setThumbnail} 
-          storyIdeaForTitle={story} 
+          initialPrompt={projectState.tm_prompt} 
+          onPromptChange={(p) => setProjectState(prev => ({ ...prev, tm_prompt: p }))} 
+          initialThumbnail={projectState.tm_generatedThumbnail} 
+          onThumbnailChange={(t) => setProjectState(prev => ({ ...prev, tm_generatedThumbnail: t }))} 
+          storyIdeaForTitle={projectState.storyForScripting} 
         />;
       case ActiveView.ProjectExport: 
-        return <ProjectExport story={story} script={editableScript} scenes={sceneDefs} titles={titles} thumbnail={thumbnail} />;
+        return <ProjectExport 
+          story={projectState.storyForScripting} 
+          selectedEpisodes={selectedEpisodes}
+          scripts={projectState.sw_generatedScripts}
+          editableScripts={projectState.tts_editableScripts}
+          sceneImageDefinitions={projectState.simg_sceneImageDefinitions}
+          titles={projectState.tcg_titleCards}
+          thumbnail={projectState.tm_generatedThumbnail}
+          audioChunks={projectState.audioChunks}
+          analyzedScripts={projectState.analyzedScriptData}
+        />;
       default: return null;
     }
   };
@@ -176,8 +270,8 @@ const App: React.FC = () => {
 
         {user && (
           <div className="flex items-center gap-4 mt-4 md:mt-0">
-            <span className="text-sm font-bold text-neu-text-dark">{user.username}</span>
-            <button onClick={() => setUser(null)} className="neu-btn px-4 py-1 text-xs font-bold text-neu-text hover:text-red-500">Sign Out</button>
+            <span className="text-sm font-bold text-neu-text-dark">{profile?.username}</span>
+            <button onClick={signOut} className="neu-btn px-4 py-1 text-xs font-bold text-neu-text hover:text-red-500">Sign Out</button>
           </div>
         )}
       </header>
@@ -187,6 +281,14 @@ const App: React.FC = () => {
       </main>
       <InfoBar />
     </div>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <FirebaseProvider>
+      <AppContent />
+    </FirebaseProvider>
   );
 };
 

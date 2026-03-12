@@ -1,0 +1,108 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (Firebase Auth UID)
+    // Fields:
+    //   - username: string (required)
+    //   - avatarSeed: string (required)
+    //   - joinedDate: number (required)
+    //   - isPro: boolean (optional)
+    //
+    // Collection: users/{userId}/projects
+    // Document ID: {projectId}
+    // Fields:
+    //   - id: string (required)
+    //   - title: string (required)
+    //   - description: string (optional)
+    //   - lastModified: number (required)
+    //   - progress: number (required)
+    //   - thumbnailUrl: string (optional)
+    //   - state: map (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "heybriano@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasRequiredFields(['username', 'avatarSeed', 'joinedDate']) &&
+             data.username is string && data.username.size() > 0 && data.username.size() < 100 &&
+             data.avatarSeed is string &&
+             data.joinedDate is number &&
+             (!('isPro' in data) || data.isPro is bool) &&
+             (!('role' in data) || data.role is string);
+    }
+
+    function isValidProject(data) {
+      return hasRequiredFields(['id', 'title', 'lastModified', 'progress', 'state']) &&
+             data.id is string &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.lastModified is number &&
+             data.progress is number &&
+             data.state is map &&
+             (!('description' in data) || data.description is string) &&
+             (!('thumbnailUrl' in data) || data.thumbnailUrl is string);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    (!('role' in request.resource.data) || isAdmin());
+      
+      allow update: if (isOwner(userId) && isValidUser(request.resource.data) && 
+                       (request.resource.data.role == resource.data.role || isAdmin())) || 
+                    isAdmin();
+      
+      allow delete: if isAdmin();
+
+      match /projects/{projectId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId) && isValidProject(request.resource.data);
+        allow update: if isOwner(userId) && isValidProject(request.resource.data);
+        allow delete: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // Test connection path
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}

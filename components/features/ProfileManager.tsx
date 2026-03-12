@@ -7,18 +7,17 @@ import { ActionButton } from '../common/ActionButton.tsx';
 interface ProfileManagerProps {
   currentUser: UserProfile | null;
   projects: Project[];
-  onSignIn: (username: string) => void;
+  onSignIn: () => void;
   onSignOut: () => void;
+  onUpgradeToPro: () => void;
   onCreateProject: () => void;
   onLoadProject: (project: Project) => void;
   onDeleteProject: (id: string) => void;
 }
 
 export const ProfileManager: React.FC<ProfileManagerProps> = ({
-  currentUser, projects, onSignIn, onSignOut, onCreateProject, onLoadProject, onDeleteProject
+  currentUser, projects, onSignIn, onSignOut, onUpgradeToPro, onCreateProject, onLoadProject, onDeleteProject
 }) => {
-  const [tempUsername, setTempUsername] = useState('');
-
   if (!currentUser) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
@@ -28,15 +27,24 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({
             <p className="text-xs text-neu-text uppercase tracking-widest font-bold">Access your Studio Project</p>
           </div>
           <div className="space-y-6">
-            <input 
-              type="text" 
-              placeholder="Username" 
-              value={tempUsername}
-              onChange={(e) => setTempUsername(e.target.value)}
-              className="w-full neu-pressed p-4 rounded-xl text-neu-text-dark outline-none focus:ring-0 transition-all"
-            />
-            <ActionButton onClick={() => tempUsername && onSignIn(tempUsername)} className="w-full py-5">
-                CONTINUE
+            <div className="flex items-center gap-3 px-2 mb-4">
+              <input 
+                type="checkbox" 
+                id="forcePro" 
+                className="w-4 h-4 accent-accent-orange"
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    localStorage.setItem('story_makr_force_pro', 'true');
+                  } else {
+                    localStorage.removeItem('story_makr_force_pro');
+                  }
+                }}
+                defaultChecked={localStorage.getItem('story_makr_force_pro') === 'true'}
+              />
+              <label htmlFor="forcePro" className="text-[10px] font-bold text-neu-text uppercase tracking-widest cursor-pointer">Dev: Always Pro Mode</label>
+            </div>
+            <ActionButton onClick={onSignIn} className="w-full py-5 flex items-center justify-center gap-3">
+                <span className="text-lg">G</span> SIGN IN WITH GOOGLE
             </ActionButton>
           </div>
         </div>
@@ -52,11 +60,24 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({
                 {currentUser.username[0].toUpperCase()}
               </div>
               <div>
-                <h2 className="text-2xl font-black text-neu-text-dark uppercase tracking-tighter">{currentUser.username}</h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-2xl font-black text-neu-text-dark uppercase tracking-tighter">{currentUser.username}</h2>
+                  {currentUser.isPro && (
+                    <span className="bg-accent-orange text-white text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest shadow-sm">PRO</span>
+                  )}
+                </div>
                 <p className="text-xs text-neu-text font-bold uppercase tracking-widest">Active User • Joined {new Date(currentUser.joinedDate).toLocaleDateString()}</p>
               </div>
           </div>
-          <div className="flex gap-4 relative z-10">
+          <div className="flex items-center gap-4 relative z-10">
+            {!currentUser.isPro && (
+              <button 
+                onClick={onUpgradeToPro} 
+                className="neu-btn px-6 py-2 text-xs font-black text-accent-orange hover:bg-accent-orange hover:text-white uppercase tracking-widest transition-all border border-accent-orange/20"
+              >
+                Upgrade to Pro
+              </button>
+            )}
             <button onClick={onSignOut} className="neu-btn px-6 py-2 text-xs font-bold text-neu-text hover:text-red-500 uppercase tracking-widest transition-colors">Sign Out</button>
             <ActionButton onClick={onCreateProject} className="px-10 py-3">START NEW PROJECT</ActionButton>
           </div>
