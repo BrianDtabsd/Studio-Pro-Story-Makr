@@ -45,12 +45,16 @@ export const ProjectExport: React.FC<Props> = ({
 
     for (const s of scenes) {
       if (s.generatedImageUrl) {
-        const imgData = s.generatedImageUrl.split(',')[1];
-        if (imgData) imgFolder?.file(`scene_${s.sceneNumber}.png`, imgData, { base64: true });
+        try {
+          const blob = await fetch(s.generatedImageUrl).then(r => r.blob());
+          imgFolder?.file(`scene_${s.sceneNumber}.jpg`, blob);
+        } catch (e) {
+          console.error(`Failed to fetch image for scene ${s.sceneNumber}`, e);
+        }
       }
       if (s.generatedVideoUrl) {
         try {
-          const vid = await (await fetch(s.generatedVideoUrl)).blob();
+          const vid = await fetch(s.generatedVideoUrl).then(r => r.blob());
           vidFolder?.file(`scene_${s.sceneNumber}.mp4`, vid);
         } catch (e) {
           console.error(`Failed to fetch video for scene ${s.sceneNumber}`, e);
@@ -62,8 +66,12 @@ export const ProjectExport: React.FC<Props> = ({
     const audioFolder = epFolder.folder("audio");
     for (const a of audio) {
       if (a.audioDataUrl) {
-        const b64 = a.audioDataUrl.split(',')[1];
-        if (b64) audioFolder?.file(a.downloadFilename, b64, { base64: true });
+        try {
+          const blob = await fetch(a.audioDataUrl).then(r => r.blob());
+          audioFolder?.file(a.downloadFilename, blob);
+        } catch (e) {
+          console.error(`Failed to fetch audio chunk ${a.downloadFilename}`, e);
+        }
       }
     }
   };
@@ -75,9 +83,13 @@ export const ProjectExport: React.FC<Props> = ({
       const zip = new JSZip();
       await packageEpisode(zip, activeStory);
       
-      if (thumbnail) {
-        const thumbData = thumbnail.src.split(',')[1];
-        if (thumbData) zip.file("thumbnail.png", thumbData, { base64: true });
+      if (thumbnail?.src) {
+        try {
+          const blob = await fetch(thumbnail.src).then(r => r.blob());
+          zip.file("thumbnail.jpg", blob);
+        } catch (e) {
+          console.error("Failed to fetch thumbnail", e);
+        }
       }
 
       const blob = await zip.generateAsync({ type: "blob" });
@@ -102,9 +114,13 @@ export const ProjectExport: React.FC<Props> = ({
         await packageEpisode(zip, ep);
       }
       
-      if (thumbnail) {
-        const thumbData = thumbnail.src.split(',')[1];
-        if (thumbData) zip.file("thumbnail.png", thumbData, { base64: true });
+      if (thumbnail?.src) {
+        try {
+          const blob = await fetch(thumbnail.src).then(r => r.blob());
+          zip.file("thumbnail.jpg", blob);
+        } catch (e) {
+          console.error("Failed to fetch thumbnail", e);
+        }
       }
 
       const blob = await zip.generateAsync({ type: "blob" });
