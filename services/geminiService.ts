@@ -23,8 +23,8 @@ const DEFAULT_CHRONOS_CALLABLE_NAMES: ChronosCallableNames = {
   analyzeScript: 'analyzeScript',
   analyzeCharacterAvatar: 'analyzeCharacterAvatar',
   generateSpeech: 'generateSpeech',
-  generateImageForPrompt: 'generateImageForPrompt',
-  generateVideoForPrompt: 'generateVideoForPrompt',
+  generateImageForPrompt: 'generateImage',
+  generateVideoForPrompt: 'generateVideo',
 };
 
 const getChronosMode = (): ChronosMode => {

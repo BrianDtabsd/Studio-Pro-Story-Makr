@@ -30,3 +30,4 @@ Story Makr calls Firebase callable functions first (from the Firebase project co
   - `fallback`: try callable functions first, then direct Gemini if callable fails.
   - `strict`: callable functions only (throws on callable failure).
 - `CHRONOS_CALLABLE_NAMES`: override callable function names without code changes.
+  - Default mapping targets Chronos names `generateImage` and `generateVideo` for image/video calls.
