@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { auth, db, signInWithPopup, googleProvider, onAuthStateChanged, doc, getDoc, setDoc, collection, query, onSnapshot, deleteDoc, User } from './firebase';
+import { httpsCallable } from 'firebase/functions';
+import { auth, db, functions, signInWithPopup, googleProvider, onAuthStateChanged, doc, getDoc, setDoc, collection, query, onSnapshot, deleteDoc, User } from './firebase';
 import { UserProfile, Project } from './types';
 
 interface FirebaseContextType {
@@ -15,6 +16,19 @@ interface FirebaseContextType {
 }
 
 const FirebaseContext = createContext<FirebaseContextType | undefined>(undefined);
+
+const pickFirstString = (...values: unknown[]): string | null => {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim().length > 0) return value;
+  }
+  return null;
+};
+
+const getStripeMode = (): 'off' | 'fallback' | 'strict' => {
+  const raw = ((window as any).APP_CONFIG?.CHRONOS_STRIPE_MODE || 'fallback').toLowerCase();
+  if (raw === 'off' || raw === 'strict' || raw === 'fallback') return raw;
+  return 'fallback';
+};
 
 export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -98,6 +112,56 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const upgradeToPro = async () => {
     if (!user || !profile) return;
+
+    const stripeMode = getStripeMode();
+    const appConfig = (window as any).APP_CONFIG || {};
+    const priceId = appConfig.CHRONOS_STRIPE_PRICE_ID as string | undefined;
+    const checkoutCallableName = (appConfig.CHRONOS_STRIPE_CHECKOUT_CALLABLE as string | undefined) || 'createCheckoutSession';
+    const successUrl = (appConfig.CHRONOS_STRIPE_SUCCESS_URL as string | undefined) || window.location.href;
+    const cancelUrl = (appConfig.CHRONOS_STRIPE_CANCEL_URL as string | undefined) || window.location.href;
+
+    if (stripeMode !== 'off') {
+      if (!priceId || priceId.trim().length === 0) {
+        if (stripeMode === 'strict') {
+          throw new Error("Stripe price ID is missing. Set APP_CONFIG.CHRONOS_STRIPE_PRICE_ID.");
+        }
+        console.warn("[Billing] CHRONOS_STRIPE_PRICE_ID missing; falling back to local Pro toggle.");
+      } else {
+        try {
+          const createCheckoutSession = httpsCallable(functions, checkoutCallableName, { timeout: 120000 });
+          const result = await createCheckoutSession({
+            priceId,
+            successUrl,
+            cancelUrl,
+            returnUrl: successUrl
+          });
+          const data = result.data as any;
+          const checkoutUrl = pickFirstString(
+            data?.url,
+            data?.checkoutUrl,
+            data?.checkoutSessionUrl,
+            data?.sessionUrl,
+            data?.data?.url
+          );
+
+          if (checkoutUrl) {
+            window.location.assign(checkoutUrl);
+            return;
+          }
+
+          if (stripeMode === 'strict') {
+            throw new Error("Checkout session created without redirect URL.");
+          }
+          console.warn("[Billing] Stripe checkout returned no URL; falling back to local Pro toggle.");
+        } catch (error) {
+          console.error("[Billing] Stripe checkout failed:", error);
+          if (stripeMode === 'strict') {
+            throw error instanceof Error ? error : new Error(String(error));
+          }
+        }
+      }
+    }
+
     try {
       const updatedProfile = { ...profile, isPro: true };
       await setDoc(doc(db, 'users', user.uid), updatedProfile);
