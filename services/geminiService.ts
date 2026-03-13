@@ -4,41 +4,7 @@ import { httpsCallable } from "firebase/functions";
 import { GEMINI_TEXT_MODEL, GEMINI_IMAGE_MODEL, GEMINI_TTS_MODEL, GEMINI_VIDEO_MODEL, GEMINI_ANALYSIS_MODEL, PRESET_VOICES_CONFIG } from "../constants.ts";
 import { StoryIdea, ScriptType, VideoGenreId, VIDEO_GENRES, ProStorySettings, AIAnalyzedScript, CharacterVoicePreset, PresetVoiceKey, PodcastFormat } from "../types.ts"; 
 import { functions as firebaseFunctions } from "../firebase";
-
-type ChronosMode = 'off' | 'fallback' | 'strict';
-type ChronosCallableKey =
-  | 'generateStoryIdeas'
-  | 'generateScript'
-  | 'analyzeScript'
-  | 'analyzeCharacterAvatar'
-  | 'generateSpeech'
-  | 'generateImageForPrompt'
-  | 'generateVideoForPrompt';
-
-type ChronosCallableNames = Record<ChronosCallableKey, string>;
-
-const DEFAULT_CHRONOS_CALLABLE_NAMES: ChronosCallableNames = {
-  generateStoryIdeas: 'generateStoryIdeas',
-  generateScript: 'generateScript',
-  analyzeScript: 'analyzeScript',
-  analyzeCharacterAvatar: 'analyzeCharacterAvatar',
-  generateSpeech: 'generateSpeech',
-  generateImageForPrompt: 'generateImage',
-  generateVideoForPrompt: 'generateVideo',
-};
-
-const getChronosMode = (): ChronosMode => {
-  const configured = ((window as any).APP_CONFIG?.CHRONOS_FUNCTIONS_MODE || 'fallback').toLowerCase();
-  if (configured === 'off' || configured === 'strict' || configured === 'fallback') {
-    return configured;
-  }
-  return 'fallback';
-};
-
-const getChronosCallableNames = (): ChronosCallableNames => {
-  const configured = (window as any).APP_CONFIG?.CHRONOS_CALLABLE_NAMES || {};
-  return { ...DEFAULT_CHRONOS_CALLABLE_NAMES, ...configured };
-};
+import { ChronosCallableKey, getChronosCallableNames, getChronosFunctionsMode } from "../appConfig";
 
 const pickFirstString = (...values: unknown[]): string | null => {
   for (const value of values) {
@@ -62,7 +28,7 @@ const callChronosCallable = async <TRequest, TResponse>(
   payload: TRequest,
   normalizer: (data: unknown) => TResponse
 ): Promise<TResponse | null> => {
-  const mode = getChronosMode();
+  const mode = getChronosFunctionsMode();
   if (mode === 'off') return null;
 
   const callableName = getChronosCallableNames()[callableKey];

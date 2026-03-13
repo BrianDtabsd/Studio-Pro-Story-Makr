@@ -10,13 +10,14 @@ interface ProfileManagerProps {
   onSignIn: () => void;
   onSignOut: () => void;
   onUpgradeToPro: () => void;
+  billingError?: string | null;
   onCreateProject: () => void;
   onLoadProject: (project: Project) => void;
   onDeleteProject: (id: string) => void;
 }
 
 export const ProfileManager: React.FC<ProfileManagerProps> = ({
-  currentUser, projects, onSignIn, onSignOut, onUpgradeToPro, onCreateProject, onLoadProject, onDeleteProject
+  currentUser, projects, onSignIn, onSignOut, onUpgradeToPro, billingError, onCreateProject, onLoadProject, onDeleteProject
 }) => {
   if (!currentUser) {
     return (
@@ -81,6 +82,11 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({
             <button onClick={onSignOut} className="neu-btn px-6 py-2 text-xs font-bold text-neu-text hover:text-red-500 uppercase tracking-widest transition-colors">Sign Out</button>
             <ActionButton onClick={onCreateProject} className="px-10 py-3">START NEW PROJECT</ActionButton>
           </div>
+          {billingError && (
+            <div className="w-full md:w-auto md:absolute md:bottom-3 md:right-8 text-xs font-bold text-red-500 uppercase tracking-wider">
+              {billingError}
+            </div>
+          )}
       </div>
 
       <div className="space-y-6">

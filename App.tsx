@@ -27,6 +27,7 @@ declare global {
 const AppContent: React.FC = () => {
   const { user, profile, projects, loading: firebaseLoading, signIn, signOut, saveProject, deleteProject, upgradeToPro } = useFirebase();
   const [activeView, setActiveView] = useState<ActiveView>(ActiveView.Hub);
+  const [billingError, setBillingError] = useState<string | null>(null);
   
   const [projectState, setProjectState] = useState<ProjectState>({
     activeView: ActiveView.Hub,
@@ -96,7 +97,13 @@ const AppContent: React.FC = () => {
   };
 
   const handleUpgradeToPro = async () => {
-    await upgradeToPro();
+    setBillingError(null);
+    try {
+      await upgradeToPro();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Pro upgrade failed.";
+      setBillingError(message);
+    }
   };
 
   // Auto-save project state
@@ -129,6 +136,7 @@ const AppContent: React.FC = () => {
         onSignIn={signIn} 
         onSignOut={signOut} 
         onUpgradeToPro={handleUpgradeToPro}
+        billingError={billingError}
         onCreateProject={() => setActiveView(ActiveView.StoryIdeas)} 
         onLoadProject={(p) => {
           setProjectState(p.state);

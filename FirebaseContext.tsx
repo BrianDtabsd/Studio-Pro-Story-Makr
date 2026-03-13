@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions, signInWithPopup, googleProvider, onAuthStateChanged, doc, getDoc, setDoc, collection, query, onSnapshot, deleteDoc, User } from './firebase';
+import { getAppConfig, getChronosStripeMode, isLocalProUpgradeAllowed } from './appConfig';
 import { UserProfile, Project } from './types';
 
 interface FirebaseContextType {
@@ -22,12 +23,6 @@ const pickFirstString = (...values: unknown[]): string | null => {
     if (typeof value === 'string' && value.trim().length > 0) return value;
   }
   return null;
-};
-
-const getStripeMode = (): 'off' | 'fallback' | 'strict' => {
-  const raw = ((window as any).APP_CONFIG?.CHRONOS_STRIPE_MODE || 'fallback').toLowerCase();
-  if (raw === 'off' || raw === 'strict' || raw === 'fallback') return raw;
-  return 'fallback';
 };
 
 export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -80,6 +75,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       await signInWithPopup(auth, googleProvider);
     } catch (error) {
       console.error("Sign in error:", error);
+      throw error instanceof Error ? error : new Error(String(error));
     }
   };
 
@@ -89,6 +85,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       localStorage.removeItem('story_makr_force_pro');
     } catch (error) {
       console.error("Sign out error:", error);
+      throw error instanceof Error ? error : new Error(String(error));
     }
   };
 
@@ -111,18 +108,22 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const upgradeToPro = async () => {
-    if (!user || !profile) return;
+    if (!user || !profile) {
+      throw new Error("You must be signed in to upgrade.");
+    }
 
-    const stripeMode = getStripeMode();
-    const appConfig = (window as any).APP_CONFIG || {};
+    const stripeMode = getChronosStripeMode();
+    const appConfig = getAppConfig();
+    const allowLocalProUpgrade = isLocalProUpgradeAllowed();
     const priceId = appConfig.CHRONOS_STRIPE_PRICE_ID as string | undefined;
     const checkoutCallableName = (appConfig.CHRONOS_STRIPE_CHECKOUT_CALLABLE as string | undefined) || 'createCheckoutSession';
     const successUrl = (appConfig.CHRONOS_STRIPE_SUCCESS_URL as string | undefined) || window.location.href;
     const cancelUrl = (appConfig.CHRONOS_STRIPE_CANCEL_URL as string | undefined) || window.location.href;
+    let canApplyLocalPro = allowLocalProUpgrade;
 
     if (stripeMode !== 'off') {
       if (!priceId || priceId.trim().length === 0) {
-        if (stripeMode === 'strict') {
+        if (stripeMode === 'strict' || !allowLocalProUpgrade) {
           throw new Error("Stripe price ID is missing. Set APP_CONFIG.CHRONOS_STRIPE_PRICE_ID.");
         }
         console.warn("[Billing] CHRONOS_STRIPE_PRICE_ID missing; falling back to local Pro toggle.");
@@ -152,14 +153,23 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (stripeMode === 'strict') {
             throw new Error("Checkout session created without redirect URL.");
           }
+          if (!allowLocalProUpgrade) {
+            throw new Error("Checkout response missing redirect URL.");
+          }
           console.warn("[Billing] Stripe checkout returned no URL; falling back to local Pro toggle.");
         } catch (error) {
           console.error("[Billing] Stripe checkout failed:", error);
-          if (stripeMode === 'strict') {
+          if (stripeMode === 'strict' || !allowLocalProUpgrade) {
             throw error instanceof Error ? error : new Error(String(error));
           }
         }
       }
+    } else {
+      canApplyLocalPro = allowLocalProUpgrade;
+    }
+
+    if (!canApplyLocalPro) {
+      throw new Error("Stripe checkout is required for Pro upgrades. Local Pro fallback is disabled.");
     }
 
     try {
@@ -169,6 +179,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       localStorage.setItem('story_makr_force_pro', 'true');
     } catch (error) {
       console.error("Firestore Error (UPGRADE profile):", error);
+      throw error instanceof Error ? error : new Error(String(error));
     }
   };
 

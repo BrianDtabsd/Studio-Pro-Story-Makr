@@ -31,6 +31,7 @@ Story Makr calls Firebase callable functions first (from the Firebase project co
   - `strict`: callable functions only (throws on callable failure).
 - `CHRONOS_CALLABLE_NAMES`: override callable function names without code changes.
   - Default mapping targets Chronos names `generateImage` and `generateVideo` for image/video calls.
+  - The default mode in `index.html` is `strict` for foundation-first behavior.
 
 ### Stripe checkout wiring
 
@@ -39,9 +40,10 @@ The `Upgrade to Pro` action can open Stripe checkout through Chronos callable fu
 `window.APP_CONFIG` billing keys in `index.html`:
 
 - `CHRONOS_STRIPE_MODE`: `off` | `fallback` | `strict`
-  - `off`: skip checkout and use local Pro toggle behavior.
-  - `fallback`: try checkout first, fall back to local Pro toggle on failure.
+  - `off`: skip checkout; local Pro is allowed only if `CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE` is `true`.
+  - `fallback`: try checkout first, then local Pro only when `CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE` is `true`.
   - `strict`: checkout only (throws if checkout cannot start).
 - `CHRONOS_STRIPE_CHECKOUT_CALLABLE`: defaults to `createCheckoutSession`.
 - `CHRONOS_STRIPE_PRICE_ID`: Stripe price ID sent to checkout callable.
 - `CHRONOS_STRIPE_SUCCESS_URL` / `CHRONOS_STRIPE_CANCEL_URL`: optional redirect URLs.
+- `CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE`: defaults to `false`; set `true` only for explicit dev fallback testing.
