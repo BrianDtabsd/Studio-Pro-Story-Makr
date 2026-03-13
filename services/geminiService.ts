@@ -1,7 +1,84 @@
 
 import { GoogleGenAI, Modality, Type, GenerateContentResponse } from "@google/genai";
+import { httpsCallable } from "firebase/functions";
 import { GEMINI_TEXT_MODEL, GEMINI_IMAGE_MODEL, GEMINI_TTS_MODEL, GEMINI_VIDEO_MODEL, GEMINI_ANALYSIS_MODEL, PRESET_VOICES_CONFIG } from "../constants.ts";
 import { StoryIdea, ScriptType, VideoGenreId, VIDEO_GENRES, ProStorySettings, AIAnalyzedScript, CharacterVoicePreset, PresetVoiceKey, PodcastFormat } from "../types.ts"; 
+import { functions as firebaseFunctions } from "../firebase";
+
+type ChronosMode = 'off' | 'fallback' | 'strict';
+type ChronosCallableKey =
+  | 'generateStoryIdeas'
+  | 'generateScript'
+  | 'analyzeScript'
+  | 'analyzeCharacterAvatar'
+  | 'generateSpeech'
+  | 'generateImageForPrompt'
+  | 'generateVideoForPrompt';
+
+type ChronosCallableNames = Record<ChronosCallableKey, string>;
+
+const DEFAULT_CHRONOS_CALLABLE_NAMES: ChronosCallableNames = {
+  generateStoryIdeas: 'generateStoryIdeas',
+  generateScript: 'generateScript',
+  analyzeScript: 'analyzeScript',
+  analyzeCharacterAvatar: 'analyzeCharacterAvatar',
+  generateSpeech: 'generateSpeech',
+  generateImageForPrompt: 'generateImageForPrompt',
+  generateVideoForPrompt: 'generateVideoForPrompt',
+};
+
+const getChronosMode = (): ChronosMode => {
+  const configured = ((window as any).APP_CONFIG?.CHRONOS_FUNCTIONS_MODE || 'fallback').toLowerCase();
+  if (configured === 'off' || configured === 'strict' || configured === 'fallback') {
+    return configured;
+  }
+  return 'fallback';
+};
+
+const getChronosCallableNames = (): ChronosCallableNames => {
+  const configured = (window as any).APP_CONFIG?.CHRONOS_CALLABLE_NAMES || {};
+  return { ...DEFAULT_CHRONOS_CALLABLE_NAMES, ...configured };
+};
+
+const pickFirstString = (...values: unknown[]): string | null => {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim().length > 0) return value;
+  }
+  return null;
+};
+
+const isLikelyBase64 = (value: string): boolean => /^[A-Za-z0-9+/=]+$/.test(value) && value.length % 4 === 0;
+
+const normalizeDataUrl = (value: string, mimeType: string): string => {
+  if (value.startsWith('data:') || value.startsWith('blob:') || value.startsWith('http://') || value.startsWith('https://')) {
+    return value;
+  }
+  if (isLikelyBase64(value)) return `data:${mimeType};base64,${value}`;
+  return value;
+};
+
+const callChronosCallable = async <TRequest, TResponse>(
+  callableKey: ChronosCallableKey,
+  payload: TRequest,
+  normalizer: (data: unknown) => TResponse
+): Promise<TResponse | null> => {
+  const mode = getChronosMode();
+  if (mode === 'off') return null;
+
+  const callableName = getChronosCallableNames()[callableKey];
+  try {
+    const callable = httpsCallable<TRequest, unknown>(firebaseFunctions, callableName, { timeout: 540000 });
+    const result = await callable(payload);
+    return normalizer(result.data);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[Chronos Functions] ${callableName} failed: ${message}`, error);
+    if (mode === 'strict') {
+      throw new Error(`Chronos function '${callableName}' failed: ${message}`);
+    }
+    return null;
+  }
+};
 
 const getAIInstance = (): GoogleGenAI => {
   if (!process.env.API_KEY) {
@@ -17,6 +94,61 @@ export const generateStoryIdeas = async (
   proSettings?: ProStorySettings,
   variationCount: number = 5
 ): Promise<StoryIdea[]> => {
+  const targetAudience = proSettings?.subGenre || 'General';
+  const normalizeStoryIdeas = (payload: unknown): StoryIdea[] => {
+    const data = payload as any;
+    if (Array.isArray(data)) {
+      return data.map((idea, i) => ({
+        ...idea,
+        id: idea.id || `idea-${i}`,
+        proSettingsUsed: idea.proSettingsUsed ?? proSettings,
+        targetAudience: idea.targetAudience ?? targetAudience,
+      }));
+    }
+
+    const fromList = data?.ideas || data?.storyIdeas;
+    if (Array.isArray(fromList)) {
+      return fromList.map((idea: any, i: number) => ({
+        ...idea,
+        id: idea.id || `idea-${i}`,
+        proSettingsUsed: idea.proSettingsUsed ?? proSettings,
+        targetAudience: idea.targetAudience ?? targetAudience,
+      }));
+    }
+
+    if (data?.seriesConcept && Array.isArray(data?.episodeIdeas)) {
+      const mapped: StoryIdea[] = [{
+        id: data.seriesConcept.id || 'series',
+        title: data.seriesConcept.title,
+        description: data.seriesConcept.description,
+        isSeriesConcept: true,
+        proSettingsUsed: proSettings,
+        targetAudience
+      }];
+      data.episodeIdeas.forEach((episode: any, i: number) => {
+        mapped.push({
+          id: episode.id || `ep-${i}`,
+          title: episode.title || episode.episodeTitle,
+          description: episode.description || episode.episodeDescription,
+          episodeNumber: episode.episodeNumber || (i + 1),
+          parentSeriesTitle: episode.parentSeriesTitle || data.seriesConcept.title,
+          proSettingsUsed: proSettings,
+          targetAudience
+        });
+      });
+      return mapped;
+    }
+
+    throw new Error("Unexpected story ideas response payload.");
+  };
+
+  const callableIdeas = await callChronosCallable(
+    'generateStoryIdeas',
+    { keywords, genres, videoStructure, proSettings, variationCount },
+    normalizeStoryIdeas
+  );
+  if (callableIdeas) return callableIdeas;
+
   const ai = getAIInstance();
   const topicLabels = genres.map(g => VIDEO_GENRES.find(v => v.id === g)?.label).join(', ');
   
@@ -47,7 +179,6 @@ export const generateStoryIdeas = async (
   });
 
   const parsed = JSON.parse(response.text || "[]");
-  const targetAudience = proSettings?.subGenre || 'General';
   if (videoStructure === 'episodic') {
     const all: StoryIdea[] = [{ id: 'series', title: parsed.seriesConcept.title, description: parsed.seriesConcept.description, isSeriesConcept: true, proSettingsUsed: proSettings, targetAudience }];
     parsed.episodeIdeas.forEach((e: any, i: number) => {
@@ -59,6 +190,17 @@ export const generateStoryIdeas = async (
 };
 
 export const generateScript = async (outline: string, scriptType: ScriptType, story?: StoryIdea): Promise<string> => {
+  const callableScript = await callChronosCallable(
+    'generateScript',
+    { outline, scriptType, story },
+    (payload) => {
+      if (typeof payload === 'string') return payload;
+      const data = payload as any;
+      return pickFirstString(data?.script, data?.generatedScript, data?.text, data?.content) || '';
+    }
+  );
+  if (callableScript) return callableScript;
+
   const ai = getAIInstance();
   const pro = story?.proSettingsUsed;
   
@@ -113,6 +255,19 @@ export const analyzeScript = async (
   fullScript: string,
   characterDefinitions: any[] = []
 ): Promise<AIAnalyzedScript> => {
+  const callableAnalysis = await callChronosCallable(
+    'analyzeScript',
+    { fullScript, characterDefinitions },
+    (payload) => {
+      if (!payload || typeof payload !== 'object') {
+        throw new Error("Unexpected script analysis payload.");
+      }
+      const data = payload as any;
+      return (data.analysis || data) as AIAnalyzedScript;
+    }
+  );
+  if (callableAnalysis) return callableAnalysis;
+
   const ai = getAIInstance();
   
   const characterBible = characterDefinitions.map(c => 
@@ -158,6 +313,17 @@ export const analyzeScript = async (
 };
 
 export const analyzeCharacterAvatar = async (imageBase64: string, characterName: string): Promise<string> => {
+  const callableDescription = await callChronosCallable(
+    'analyzeCharacterAvatar',
+    { imageBase64, characterName },
+    (payload) => {
+      if (typeof payload === 'string') return payload;
+      const data = payload as any;
+      return pickFirstString(data?.description, data?.text, data?.result) || '';
+    }
+  );
+  if (callableDescription) return callableDescription;
+
   const ai = getAIInstance();
   const response = await ai.models.generateContent({
     model: GEMINI_ANALYSIS_MODEL,
@@ -218,6 +384,27 @@ export const generateSpeech = async (
   voicePresets: Record<string, CharacterVoicePreset>,
   defaultVoiceKey: PresetVoiceKey = 'Narrator_M'
 ): Promise<string> => {
+  const callableAudio = await callChronosCallable(
+    'generateSpeech',
+    { dialogueItems, voicePresets, defaultVoiceKey },
+    (payload) => {
+      if (typeof payload === 'string') return normalizeDataUrl(payload, 'audio/wav');
+      const data = payload as any;
+      const source = pickFirstString(
+        data?.audioDataUrl,
+        data?.audioUrl,
+        data?.url,
+        data?.audioContent,
+        data?.audioBase64
+      );
+      if (!source) {
+        throw new Error("No audio returned from callable.");
+      }
+      return normalizeDataUrl(source, data?.mimeType || 'audio/wav');
+    }
+  );
+  if (callableAudio) return callableAudio;
+
   try {
     const ai = getAIInstance();
     const text = dialogueItems.map(d => `${d.speaker}: ${d.text}`).join('\n');
@@ -247,6 +434,21 @@ export const generateSpeech = async (
 };
 
 export const generateImageForPrompt = async (prompt: string, realistic: boolean = false): Promise<string> => {
+  const callableImage = await callChronosCallable(
+    'generateImageForPrompt',
+    { prompt, realistic },
+    (payload) => {
+      if (typeof payload === 'string') return normalizeDataUrl(payload, 'image/png');
+      const data = payload as any;
+      const source = pickFirstString(data?.imageUrl, data?.imageDataUrl, data?.src, data?.url, data?.imageBase64);
+      if (!source) {
+        throw new Error("No image returned from callable.");
+      }
+      return normalizeDataUrl(source, data?.mimeType || 'image/png');
+    }
+  );
+  if (callableImage) return callableImage;
+
   try {
     const ai = getAIInstance();
     let finalPrompt = prompt;
@@ -272,6 +474,21 @@ export const generateImageForPrompt = async (prompt: string, realistic: boolean 
 };
 
 export const generateVideoForPrompt = async (prompt: string, res: '720p' | '1080p' = '1080p', img?: string): Promise<string> => {
+  const callableVideo = await callChronosCallable(
+    'generateVideoForPrompt',
+    { prompt, resolution: res, image: img || null },
+    (payload) => {
+      if (typeof payload === 'string') return normalizeDataUrl(payload, 'video/mp4');
+      const data = payload as any;
+      const source = pickFirstString(data?.videoUrl, data?.videoDataUrl, data?.url, data?.videoBase64);
+      if (!source) {
+        throw new Error("No video returned from callable.");
+      }
+      return normalizeDataUrl(source, data?.mimeType || 'video/mp4');
+    }
+  );
+  if (callableVideo) return callableVideo;
+
   try {
     const ai = getAIInstance();
     const payload: any = { 

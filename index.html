@@ -103,7 +103,17 @@
 </script>
 <script>
   window.APP_CONFIG = {
-    GOOGLE_CLOUD_TTS_API_KEY: "AIzaSyBLR4V5JZ-I1DHjV-uALirNNJYprmsw--E"
+    GOOGLE_CLOUD_TTS_API_KEY: "AIzaSyBLR4V5JZ-I1DHjV-uALirNNJYprmsw--E",
+    CHRONOS_FUNCTIONS_MODE: "fallback",
+    CHRONOS_CALLABLE_NAMES: {
+      generateStoryIdeas: "generateStoryIdeas",
+      generateScript: "generateScript",
+      analyzeScript: "analyzeScript",
+      analyzeCharacterAvatar: "analyzeCharacterAvatar",
+      generateSpeech: "generateSpeech",
+      generateImageForPrompt: "generateImageForPrompt",
+      generateVideoForPrompt: "generateVideoForPrompt"
+    }
   };
 </script>
 <link rel="stylesheet" href="/index.css">
