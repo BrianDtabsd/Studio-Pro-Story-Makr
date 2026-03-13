@@ -19,11 +19,21 @@ View your app in AI Studio: https://ai.studio/apps/37083281-4446-4ce5-823b-46bc1
 3. Run the app:
    `npm run dev`
 
+Optional `.env.local` billing/function overrides (recommended for Story Makr runtime wiring):
+- `CHRONOS_FUNCTIONS_MODE`
+- `CHRONOS_STRIPE_MODE`
+- `CHRONOS_STRIPE_CHECKOUT_CALLABLE`
+- `CHRONOS_STRIPE_PRICE_ID`
+- `CHRONOS_STRIPE_SUCCESS_URL`
+- `CHRONOS_STRIPE_CANCEL_URL`
+- `CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE`
+
 ## Chronos function wiring
 
 Story Makr calls Firebase callable functions first (from the Firebase project configured in `firebase-applet-config.json`), then falls back to direct Gemini calls when configured for fallback mode.
 
 `window.APP_CONFIG` controls this behavior in `index.html`:
+(`.env.local` values with the same keys override `window.APP_CONFIG` at runtime.)
 
 - `CHRONOS_FUNCTIONS_MODE`: `off` | `fallback` | `strict`
   - `off`: skip callable functions and always use direct Gemini.

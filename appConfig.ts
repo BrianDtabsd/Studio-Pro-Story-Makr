@@ -42,9 +42,33 @@ const parseMode = (raw: string | undefined, fallback: RuntimeMode): RuntimeMode 
   return fallback;
 };
 
+const readEnvConfig = (): RuntimeAppConfig => {
+  const envConfig: RuntimeAppConfig = {};
+
+  const putString = (key: keyof RuntimeAppConfig, value: string | undefined) => {
+    if (typeof value === 'string' && value.trim().length > 0) {
+      envConfig[key] = value;
+    }
+  };
+
+  putString('CHRONOS_FUNCTIONS_MODE', process.env.CHRONOS_FUNCTIONS_MODE);
+  putString('CHRONOS_STRIPE_MODE', process.env.CHRONOS_STRIPE_MODE);
+  putString('CHRONOS_STRIPE_CHECKOUT_CALLABLE', process.env.CHRONOS_STRIPE_CHECKOUT_CALLABLE);
+  putString('CHRONOS_STRIPE_PRICE_ID', process.env.CHRONOS_STRIPE_PRICE_ID);
+  putString('CHRONOS_STRIPE_SUCCESS_URL', process.env.CHRONOS_STRIPE_SUCCESS_URL);
+  putString('CHRONOS_STRIPE_CANCEL_URL', process.env.CHRONOS_STRIPE_CANCEL_URL);
+
+  const localUpgradeRaw = process.env.CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE;
+  if (localUpgradeRaw === 'true') envConfig.CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE = true;
+  if (localUpgradeRaw === 'false') envConfig.CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE = false;
+
+  return envConfig;
+};
+
 export const getAppConfig = (): RuntimeAppConfig => {
-  if (typeof window === 'undefined') return {};
-  return window.APP_CONFIG || {};
+  const envConfig = readEnvConfig();
+  if (typeof window === 'undefined') return envConfig;
+  return { ...(window.APP_CONFIG || {}), ...envConfig };
 };
 
 export const getChronosCallableNames = (): ChronosCallableNames => {

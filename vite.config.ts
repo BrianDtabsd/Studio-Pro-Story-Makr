@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
+    const envOrEmpty = (key: string) => env[key] || '';
     return {
       server: {
         port: 3000,
@@ -11,8 +12,15 @@ export default defineConfig(({ mode }) => {
       },
       plugins: [react()],
       define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+        'process.env.API_KEY': JSON.stringify(envOrEmpty('GEMINI_API_KEY')),
+        'process.env.GEMINI_API_KEY': JSON.stringify(envOrEmpty('GEMINI_API_KEY')),
+        'process.env.CHRONOS_FUNCTIONS_MODE': JSON.stringify(envOrEmpty('CHRONOS_FUNCTIONS_MODE')),
+        'process.env.CHRONOS_STRIPE_MODE': JSON.stringify(envOrEmpty('CHRONOS_STRIPE_MODE')),
+        'process.env.CHRONOS_STRIPE_CHECKOUT_CALLABLE': JSON.stringify(envOrEmpty('CHRONOS_STRIPE_CHECKOUT_CALLABLE')),
+        'process.env.CHRONOS_STRIPE_PRICE_ID': JSON.stringify(envOrEmpty('CHRONOS_STRIPE_PRICE_ID')),
+        'process.env.CHRONOS_STRIPE_SUCCESS_URL': JSON.stringify(envOrEmpty('CHRONOS_STRIPE_SUCCESS_URL')),
+        'process.env.CHRONOS_STRIPE_CANCEL_URL': JSON.stringify(envOrEmpty('CHRONOS_STRIPE_CANCEL_URL')),
+        'process.env.CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE': JSON.stringify(envOrEmpty('CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE'))
       },
       resolve: {
         alias: {
