@@ -12,6 +12,7 @@ interface FirebaseContextType {
   signOut: () => Promise<void>;
   saveProject: (project: Project) => Promise<void>;
   deleteProject: (projectId: string) => Promise<void>;
+  updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
   upgradeToPro: () => Promise<void>;
 }
 
@@ -43,6 +44,15 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           setProfile(newProfile);
         }
 
+        // Real-time listener on user doc — updates profile instantly when
+        // the Stripe webhook writes plan: 'pro' to Firestore.
+        const unsubscribeProfile = onSnapshot(doc(db, 'users', firebaseUser.uid), (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            setProfile({ ...data, isPro: data.plan === 'pro' } as UserProfile);
+          }
+        });
+
         // Listen for projects
         const q = query(collection(db, 'users', firebaseUser.uid, 'projects'));
         const unsubscribeProjects = onSnapshot(q, (snapshot) => {
@@ -52,7 +62,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           console.error("Firestore Error (LIST projects):", error);
         });
 
-        return () => unsubscribeProjects();
+        setLoading(false);
+        return () => { unsubscribeProfile(); unsubscribeProjects(); };
       } else {
         setProfile(null);
         setProjects([]);
@@ -100,22 +111,24 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const upgradeToPro = async () => {
-    if (!user || !profile) return;
+  const updateProfile = async (updates: Partial<UserProfile>) => {
+    if (!user) return;
     try {
-      const updatedProfile = { ...profile, isPro: true };
-      await setDoc(doc(db, 'users', user.uid), updatedProfile);
-      setProfile(updatedProfile);
-      localStorage.setItem('story_makr_force_pro', 'true');
+      await setDoc(doc(db, 'users', user.uid), updates, { merge: true });
+      // onSnapshot listener on the user doc will pick up the change automatically.
     } catch (error) {
-      console.error("Firestore Error (UPGRADE profile):", error);
+      console.error("Firestore Error (UPDATE profile):", error);
     }
   };
+
+  // Upgrade is handled via Stripe checkout — see CheckoutModal in App.tsx.
+  // This stub keeps the context interface stable.
+  const upgradeToPro = async () => {};
 
   return (
     <FirebaseContext.Provider value={{ 
       user, profile, projects, loading, 
-      signIn, signOut: signOutUser, saveProject, deleteProject, upgradeToPro 
+      signIn, signOut: signOutUser, saveProject, deleteProject, updateProfile, upgradeToPro
     }}>
       {children}
     </FirebaseContext.Provider>

@@ -167,6 +167,8 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
               onChange={(e) => toggleTopic(e.target.value as VideoGenreId)}
               className="neu-pressed px-4 py-2 text-xs font-medium text-neu-text focus:outline-none w-full"
               value=""
+              aria-label="Add topics"
+              title="Add topics"
             >
               <option value="" disabled>Add topics...</option>
               {VIDEO_GENRES.map(g => (
@@ -384,7 +386,14 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
                   >
                     <div className="flex justify-between items-center">
                       <span className="text-[10px] font-bold text-accent-orange uppercase">Episode</span>
-                      <input type="checkbox" checked={selectedIdeaIds.includes(ep.id)} readOnly className="w-4 h-4 rounded text-accent-orange" />
+                      <input
+                        type="checkbox"
+                        checked={selectedIdeaIds.includes(ep.id)}
+                        readOnly
+                        aria-label={`Select episode ${ep.title}`}
+                        title={`Select episode ${ep.title}`}
+                        className="w-4 h-4 rounded text-accent-orange"
+                      />
                     </div>
                     <h4 className="text-sm font-bold text-neu-text-dark line-clamp-1">{ep.title}</h4>
                     <p className="text-xs text-neu-text line-clamp-2">{ep.description}</p>
@@ -413,6 +422,8 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
                       type="file" 
                       accept="video/*,audio/*"
                       onChange={handleFileUpload}
+                      title="Upload Video or Audio File"
+                      aria-label="Upload Video or Audio File"
                       className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                     />
                     <div className="neu-btn w-full py-2 text-xs font-bold text-neu-text text-center">

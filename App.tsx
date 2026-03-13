@@ -10,13 +10,15 @@ import { ThumbnailMaker } from './components/features/ThumbnailMaker.tsx';
 import { TextToSpeech } from './components/features/TextToSpeech.tsx';
 import { ProfileManager } from './components/features/ProfileManager.tsx';
 import { ProjectExport } from './components/features/ProjectExport.tsx';
+import { LandingPage } from './components/LandingPage.tsx';
+import CheckoutModal from './components/CheckoutModal';
 import { InfoBar } from './components/InfoBar.tsx';
 import { ActionButton } from './components/common/ActionButton.tsx';
 import { FirebaseProvider, useFirebase } from './FirebaseContext';
 import { uploadImageAsset, uploadAudioAsset } from './services/storageService';
 
 const AppContent: React.FC = () => {
-  const { user, profile, projects, loading: firebaseLoading, signIn, signOut, saveProject, deleteProject, upgradeToPro } = useFirebase();
+  const { user, profile, projects, loading: firebaseLoading, signIn, signOut, saveProject, deleteProject, updateProfile } = useFirebase();
   const [activeView, setActiveView] = useState<ActiveView>(ActiveView.Hub);
   
   const [projectState, setProjectState] = useState<ProjectState>({
@@ -44,6 +46,23 @@ const AppContent: React.FC = () => {
   });
 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [checkoutPriceId, setCheckoutPriceId] = useState<string | null>(null);
+  const [paymentSuccess, setPaymentSuccess] = useState(false);
+
+  // After sign-in: check for a pending checkout the user initiated from the landing page
+  useEffect(() => {
+    if (!user) return;
+    const priceId = sessionStorage.getItem('sm_pending_checkout');
+    if (priceId) {
+      sessionStorage.removeItem('sm_pending_checkout');
+      setCheckoutPriceId(priceId);
+    }
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('payment') === 'complete') {
+      setPaymentSuccess(true);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, [user]);
 
   // Strip raw binary assets before writing to Firestore.
   // base64 data: URLs and ephemeral blob: URLs are replaced with empty string
@@ -108,8 +127,10 @@ const AppContent: React.FC = () => {
     { id: ActiveView.ProjectExport, label: 'Export', icon: '📦' },
   ];
 
-  const handleUpgradeToPro = async () => {
-    await upgradeToPro();
+  // Opens the Stripe embedded checkout. Default to USD monthly; landing page
+  // handles the CAD/annual toggle for pre-signup visitors.
+  const handleUpgradeToPro = () => {
+    setCheckoutPriceId('price_1TAG2vAHxmIA77jAagUXCyht');
   };
 
   // Auto-save project state — debounced 2s after any state change.
@@ -124,7 +145,15 @@ const AppContent: React.FC = () => {
           title: projectState.storyForScripting.title,
           description: projectState.storyForScripting.description,
           lastModified: Date.now(),
-          progress: 50,
+          progress: (() => {
+            let p = 0;
+            if (projectState.storyForScripting) p += 20;
+            if (Object.keys(projectState.sw_generatedScripts).some(k => projectState.sw_generatedScripts[k].length > 0)) p += 20;
+            if (Object.keys(projectState.audioChunks).some(k => projectState.audioChunks[k].length > 0)) p += 20;
+            if (Object.keys(projectState.simg_sceneImageDefinitions).some(k => projectState.simg_sceneImageDefinitions[k].length > 0)) p += 20;
+            if (projectState.tm_generatedThumbnail) p += 20;
+            return Math.max(p, 5);
+          })(),
           state: sanitizeStateForFirestore(projectState),
         };
         await saveProject(project);
@@ -201,19 +230,23 @@ const AppContent: React.FC = () => {
   const renderView = () => {
     if (firebaseLoading) return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
 
-    if (!user || activeView === ActiveView.Hub) return (
-      <ProfileManager 
-        currentUser={profile} 
-        projects={projects} 
-        onSignIn={signIn} 
-        onSignOut={signOut} 
+    if (!user) return <LandingPage onSignIn={signIn} />;
+
+    if (activeView === ActiveView.Hub) return (
+      <ProfileManager
+        currentUser={profile}
+        projects={projects}
+        onSignIn={signIn}
+        onSignOut={signOut}
         onUpgradeToPro={handleUpgradeToPro}
-        onCreateProject={() => setActiveView(ActiveView.StoryIdeas)} 
+        onCreateProject={() => setActiveView(ActiveView.StoryIdeas)}
         onLoadProject={(p) => {
           setProjectState(p.state);
           setActiveView(p.state.activeView || ActiveView.StoryIdeas);
-        }} 
-        onDeleteProject={deleteProject} 
+        }}
+        onDeleteProject={deleteProject}
+        onUpdateProfile={updateProfile}
+        userId={user?.uid ?? ''}
       />
     );
     
@@ -322,6 +355,11 @@ const AppContent: React.FC = () => {
     }
   };
 
+  // Landing page renders as a full standalone page — skip app shell entirely
+  if (!firebaseLoading && !user) {
+    return <LandingPage onSignIn={signIn} />;
+  }
+
   return (
     <div className="min-h-screen p-4 md:p-8 flex flex-col gap-6 bg-neu-base text-neu-text">
       <header className="neu-flat px-8 py-5 flex flex-col md:flex-row items-center justify-between">
@@ -370,6 +408,29 @@ const AppContent: React.FC = () => {
         {renderView()}
       </main>
       <InfoBar />
+
+      {checkoutPriceId && (
+        <CheckoutModal
+          priceId={checkoutPriceId}
+          onClose={() => setCheckoutPriceId(null)}
+        />
+      )}
+
+      {paymentSuccess && (
+        <div style={{
+          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 900, display: 'flex', alignItems: 'center', gap: 10,
+          padding: '12px 24px', background: '#16a34a', color: '#fff',
+          borderRadius: 999, boxShadow: '0 8px 32px rgba(22,163,74,0.4)',
+          fontSize: 13, fontWeight: 700,
+        }}>
+          ✓ Subscription activated — welcome to Story Makr Pro!
+          <button
+            onClick={() => setPaymentSuccess(false)}
+            style={{ marginLeft: 8, background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
+          >×</button>
+        </div>
+      )}
     </div>
   );
 };
