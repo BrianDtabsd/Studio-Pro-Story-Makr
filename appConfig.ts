@@ -45,7 +45,15 @@ const parseMode = (raw: string | undefined, fallback: RuntimeMode): RuntimeMode 
 const readEnvConfig = (): RuntimeAppConfig => {
   const envConfig: RuntimeAppConfig = {};
 
-  const putString = (key: keyof RuntimeAppConfig, value: string | undefined) => {
+  type StringConfigKey =
+    | 'CHRONOS_FUNCTIONS_MODE'
+    | 'CHRONOS_STRIPE_MODE'
+    | 'CHRONOS_STRIPE_CHECKOUT_CALLABLE'
+    | 'CHRONOS_STRIPE_PRICE_ID'
+    | 'CHRONOS_STRIPE_SUCCESS_URL'
+    | 'CHRONOS_STRIPE_CANCEL_URL';
+
+  const putString = (key: StringConfigKey, value: string | undefined) => {
     if (typeof value === 'string' && value.trim().length > 0) {
       envConfig[key] = value;
     }
