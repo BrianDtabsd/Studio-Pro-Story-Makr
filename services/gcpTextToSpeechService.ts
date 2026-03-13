@@ -34,10 +34,10 @@ let gcpApiKeyVal: string | null = null;
 
 const getGcpApiKey = (): string => {
   if (gcpApiKeyVal) return gcpApiKeyVal;
-  const key = (window as any).APP_CONFIG?.GOOGLE_CLOUD_TTS_API_KEY;
+  const key = process.env.GOOGLE_CLOUD_TTS_API_KEY;
   if (!key || key === "YOUR_GCP_TTS_API_KEY_HERE" || key === "YOUR_ACTUAL_GOOGLE_CLOUD_TTS_API_KEY_HERE" || key === "") {
-    console.error(GCP_TTS_API_KEY_MISSING_MESSAGE + " Please ensure it's set in index.html in window.APP_CONFIG.GOOGLE_CLOUD_TTS_API_KEY.");
-    throw new Error(GCP_TTS_API_KEY_MISSING_MESSAGE + " Please set it in index.html.");
+    console.error(GCP_TTS_API_KEY_MISSING_MESSAGE + " Please ensure GOOGLE_CLOUD_TTS_API_KEY is set in .env.local.");
+    throw new Error(GCP_TTS_API_KEY_MISSING_MESSAGE + " Please set GOOGLE_CLOUD_TTS_API_KEY in .env.local.");
   }
   gcpApiKeyVal = key;
   return gcpApiKeyVal;

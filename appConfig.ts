@@ -12,7 +12,6 @@ export type ChronosCallableKey =
 export type ChronosCallableNames = Record<ChronosCallableKey, string>;
 
 export interface RuntimeAppConfig {
-  GOOGLE_CLOUD_TTS_API_KEY?: string;
   CHRONOS_FUNCTIONS_MODE?: string;
   CHRONOS_CALLABLE_NAMES?: Partial<ChronosCallableNames>;
   CHRONOS_STRIPE_MODE?: string;
@@ -20,7 +19,6 @@ export interface RuntimeAppConfig {
   CHRONOS_STRIPE_PRICE_ID?: string;
   CHRONOS_STRIPE_SUCCESS_URL?: string;
   CHRONOS_STRIPE_CANCEL_URL?: string;
-  CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE?: boolean;
 }
 
 const DEFAULT_CHRONOS_CALLABLE_NAMES: ChronosCallableNames = {
@@ -66,10 +64,6 @@ const readEnvConfig = (): RuntimeAppConfig => {
   putString('CHRONOS_STRIPE_SUCCESS_URL', process.env.CHRONOS_STRIPE_SUCCESS_URL);
   putString('CHRONOS_STRIPE_CANCEL_URL', process.env.CHRONOS_STRIPE_CANCEL_URL);
 
-  const localUpgradeRaw = process.env.CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE;
-  if (localUpgradeRaw === 'true') envConfig.CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE = true;
-  if (localUpgradeRaw === 'false') envConfig.CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE = false;
-
   return envConfig;
 };
 
@@ -89,9 +83,6 @@ export const getChronosFunctionsMode = (): RuntimeMode =>
 
 export const getChronosStripeMode = (): RuntimeMode =>
   parseMode(getAppConfig().CHRONOS_STRIPE_MODE, 'strict');
-
-export const isLocalProUpgradeAllowed = (): boolean =>
-  getAppConfig().CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE === true;
 
 declare global {
   interface Window {

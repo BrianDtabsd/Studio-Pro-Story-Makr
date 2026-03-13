@@ -1,7 +1,6 @@
 
-import React, { useState } from 'react';
-import { Project, UserProfile, ActiveView } from '../../types.ts';
-import { SectionCard } from '../SectionCard.tsx';
+import React from 'react';
+import { Project, UserProfile } from '../../types.ts';
 import { ActionButton } from '../common/ActionButton.tsx';
 
 interface ProfileManagerProps {
@@ -10,6 +9,7 @@ interface ProfileManagerProps {
   onSignIn: () => void;
   onSignOut: () => void;
   onUpgradeToPro: () => void;
+  authError?: string | null;
   billingError?: string | null;
   onCreateProject: () => void;
   onLoadProject: (project: Project) => void;
@@ -17,7 +17,7 @@ interface ProfileManagerProps {
 }
 
 export const ProfileManager: React.FC<ProfileManagerProps> = ({
-  currentUser, projects, onSignIn, onSignOut, onUpgradeToPro, billingError, onCreateProject, onLoadProject, onDeleteProject
+  currentUser, projects, onSignIn, onSignOut, onUpgradeToPro, authError, billingError, onCreateProject, onLoadProject, onDeleteProject
 }) => {
   if (!currentUser) {
     return (
@@ -28,25 +28,14 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({
             <p className="text-xs text-neu-text uppercase tracking-widest font-bold">Access your Studio Project</p>
           </div>
           <div className="space-y-6">
-            <div className="flex items-center gap-3 px-2 mb-4">
-              <input 
-                type="checkbox" 
-                id="forcePro" 
-                className="w-4 h-4 accent-accent-orange"
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    localStorage.setItem('story_makr_force_pro', 'true');
-                  } else {
-                    localStorage.removeItem('story_makr_force_pro');
-                  }
-                }}
-                defaultChecked={localStorage.getItem('story_makr_force_pro') === 'true'}
-              />
-              <label htmlFor="forcePro" className="text-[10px] font-bold text-neu-text uppercase tracking-widest cursor-pointer">Dev: Always Pro Mode</label>
-            </div>
             <ActionButton onClick={onSignIn} className="w-full py-5 flex items-center justify-center gap-3">
                 <span className="text-lg">G</span> SIGN IN WITH GOOGLE
             </ActionButton>
+            {authError && (
+              <div className="text-xs font-bold text-red-500 uppercase tracking-wider text-center">
+                {authError}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -85,6 +74,11 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({
           {billingError && (
             <div className="w-full md:w-auto md:absolute md:bottom-3 md:right-8 text-xs font-bold text-red-500 uppercase tracking-wider">
               {billingError}
+            </div>
+          )}
+          {authError && (
+            <div className="w-full md:w-auto md:absolute md:bottom-8 md:right-8 text-xs font-bold text-red-500 uppercase tracking-wider">
+              {authError}
             </div>
           )}
       </div>

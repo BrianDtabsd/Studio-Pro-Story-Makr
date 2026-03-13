@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions, signInWithPopup, googleProvider, onAuthStateChanged, doc, getDoc, setDoc, collection, query, onSnapshot, deleteDoc, User } from './firebase';
-import { getAppConfig, getChronosStripeMode, isLocalProUpgradeAllowed } from './appConfig';
+import { getAppConfig, getChronosStripeMode } from './appConfig';
 import { UserProfile, Project } from './types';
 
 interface FirebaseContextType {
@@ -32,42 +32,79 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let unsubscribeProfile: (() => void) | null = null;
+    let unsubscribeProjects: (() => void) | null = null;
+    let authEventId = 0;
+
+    const clearUserListeners = () => {
+      if (unsubscribeProfile) {
+        unsubscribeProfile();
+        unsubscribeProfile = null;
+      }
+      if (unsubscribeProjects) {
+        unsubscribeProjects();
+        unsubscribeProjects = null;
+      }
+    };
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      authEventId += 1;
+      const eventId = authEventId;
+      clearUserListeners();
       setUser(firebaseUser);
+      setLoading(true);
       if (firebaseUser) {
-        // Fetch or create profile
-        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-        if (userDoc.exists()) {
-          setProfile(userDoc.data() as UserProfile);
-        } else {
-          const newProfile: UserProfile = {
-            username: firebaseUser.displayName || 'Anonymous',
-            avatarSeed: Math.random().toString(36).substring(7),
-            joinedDate: Date.now(),
-            isPro: localStorage.getItem('story_makr_force_pro') === 'true'
-          };
-          await setDoc(doc(db, 'users', firebaseUser.uid), newProfile);
-          setProfile(newProfile);
+        try {
+          const profileRef = doc(db, 'users', firebaseUser.uid);
+          const userDoc = await getDoc(profileRef);
+          if (eventId !== authEventId) return;
+
+          if (!userDoc.exists()) {
+            const newProfile: UserProfile = {
+              username: firebaseUser.displayName || 'Anonymous',
+              avatarSeed: Math.random().toString(36).substring(7),
+              joinedDate: Date.now(),
+              isPro: false
+            };
+            await setDoc(profileRef, newProfile);
+          }
+          if (eventId !== authEventId) return;
+
+          // Live profile sync prevents stale state after checkout/webhook updates.
+          unsubscribeProfile = onSnapshot(profileRef, (snapshot) => {
+            setProfile(snapshot.exists() ? (snapshot.data() as UserProfile) : null);
+          }, (error) => {
+            console.error("Firestore Error (LIST profile):", error);
+          });
+
+          const q = query(collection(db, 'users', firebaseUser.uid, 'projects'));
+          unsubscribeProjects = onSnapshot(q, (snapshot) => {
+            const projectList = snapshot.docs.map(doc => doc.data() as Project);
+            setProjects(projectList.sort((a, b) => b.lastModified - a.lastModified));
+          }, (error) => {
+            console.error("Firestore Error (LIST projects):", error);
+          });
+        } catch (error) {
+          console.error("Auth bootstrap error:", error);
+          if (eventId === authEventId) {
+            setProfile(null);
+            setProjects([]);
+          }
+        } finally {
+          if (eventId === authEventId) setLoading(false);
         }
-
-        // Listen for projects
-        const q = query(collection(db, 'users', firebaseUser.uid, 'projects'));
-        const unsubscribeProjects = onSnapshot(q, (snapshot) => {
-          const projectList = snapshot.docs.map(doc => doc.data() as Project);
-          setProjects(projectList.sort((a, b) => b.lastModified - a.lastModified));
-        }, (error) => {
-          console.error("Firestore Error (LIST projects):", error);
-        });
-
-        return () => unsubscribeProjects();
       } else {
         setProfile(null);
         setProjects([]);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      authEventId += 1;
+      clearUserListeners();
+      unsubscribe();
+    };
   }, []);
 
   const signIn = async () => {
@@ -82,7 +119,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const signOutUser = async () => {
     try {
       await auth.signOut();
-      localStorage.removeItem('story_makr_force_pro');
     } catch (error) {
       console.error("Sign out error:", error);
       throw error instanceof Error ? error : new Error(String(error));
@@ -113,72 +149,40 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     const stripeMode = getChronosStripeMode();
+    if (stripeMode === 'off') {
+      throw new Error("Upgrade is disabled. Enable CHRONOS_STRIPE_MODE.");
+    }
     const appConfig = getAppConfig();
-    const allowLocalProUpgrade = isLocalProUpgradeAllowed();
     const priceId = appConfig.CHRONOS_STRIPE_PRICE_ID as string | undefined;
     const checkoutCallableName = (appConfig.CHRONOS_STRIPE_CHECKOUT_CALLABLE as string | undefined) || 'createCheckoutSession';
     const successUrl = (appConfig.CHRONOS_STRIPE_SUCCESS_URL as string | undefined) || window.location.href;
     const cancelUrl = (appConfig.CHRONOS_STRIPE_CANCEL_URL as string | undefined) || window.location.href;
-    let canApplyLocalPro = allowLocalProUpgrade;
-
-    if (stripeMode !== 'off') {
-      if (!priceId || priceId.trim().length === 0) {
-        if (stripeMode === 'strict' || !allowLocalProUpgrade) {
-          throw new Error("Stripe price ID is missing. Set APP_CONFIG.CHRONOS_STRIPE_PRICE_ID.");
-        }
-        console.warn("[Billing] CHRONOS_STRIPE_PRICE_ID missing; falling back to local Pro toggle.");
-      } else {
-        try {
-          const createCheckoutSession = httpsCallable(functions, checkoutCallableName, { timeout: 120000 });
-          const result = await createCheckoutSession({
-            priceId,
-            successUrl,
-            cancelUrl,
-            returnUrl: successUrl
-          });
-          const data = result.data as any;
-          const checkoutUrl = pickFirstString(
-            data?.url,
-            data?.checkoutUrl,
-            data?.checkoutSessionUrl,
-            data?.sessionUrl,
-            data?.data?.url
-          );
-
-          if (checkoutUrl) {
-            window.location.assign(checkoutUrl);
-            return;
-          }
-
-          if (stripeMode === 'strict') {
-            throw new Error("Checkout session created without redirect URL.");
-          }
-          if (!allowLocalProUpgrade) {
-            throw new Error("Checkout response missing redirect URL.");
-          }
-          console.warn("[Billing] Stripe checkout returned no URL; falling back to local Pro toggle.");
-        } catch (error) {
-          console.error("[Billing] Stripe checkout failed:", error);
-          if (stripeMode === 'strict' || !allowLocalProUpgrade) {
-            throw error instanceof Error ? error : new Error(String(error));
-          }
-        }
-      }
-    } else {
-      canApplyLocalPro = allowLocalProUpgrade;
-    }
-
-    if (!canApplyLocalPro) {
-      throw new Error("Stripe checkout is required for Pro upgrades. Local Pro fallback is disabled.");
+    if (!priceId || priceId.trim().length === 0) {
+      throw new Error("Stripe price ID is missing. Set CHRONOS_STRIPE_PRICE_ID.");
     }
 
     try {
-      const updatedProfile = { ...profile, isPro: true };
-      await setDoc(doc(db, 'users', user.uid), updatedProfile);
-      setProfile(updatedProfile);
-      localStorage.setItem('story_makr_force_pro', 'true');
+      const createCheckoutSession = httpsCallable(functions, checkoutCallableName, { timeout: 120000 });
+      const result = await createCheckoutSession({
+        priceId,
+        successUrl,
+        cancelUrl,
+        returnUrl: successUrl
+      });
+      const data = result.data as any;
+      const checkoutUrl = pickFirstString(
+        data?.url,
+        data?.checkoutUrl,
+        data?.checkoutSessionUrl,
+        data?.sessionUrl,
+        data?.data?.url
+      );
+      if (!checkoutUrl) {
+        throw new Error("Checkout session created without redirect URL.");
+      }
+      window.location.assign(checkoutUrl);
     } catch (error) {
-      console.error("Firestore Error (UPGRADE profile):", error);
+      console.error("[Billing] Stripe checkout failed:", error);
       throw error instanceof Error ? error : new Error(String(error));
     }
   };

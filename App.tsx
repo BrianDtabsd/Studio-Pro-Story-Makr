@@ -27,6 +27,7 @@ declare global {
 const AppContent: React.FC = () => {
   const { user, profile, projects, loading: firebaseLoading, signIn, signOut, saveProject, deleteProject, upgradeToPro } = useFirebase();
   const [activeView, setActiveView] = useState<ActiveView>(ActiveView.Hub);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [billingError, setBillingError] = useState<string | null>(null);
   
   const [projectState, setProjectState] = useState<ProjectState>({
@@ -81,6 +82,10 @@ const AppContent: React.FC = () => {
     }
   }, [profile]);
 
+  useEffect(() => {
+    if (user) setAuthError(null);
+  }, [user]);
+
   const navItems: NavItem[] = [
     { id: ActiveView.Hub, label: 'Projects', icon: '📁' },
     { id: ActiveView.StoryIdeas, label: '1. Settings', icon: '⚙️' },
@@ -103,6 +108,26 @@ const AppContent: React.FC = () => {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Pro upgrade failed.";
       setBillingError(message);
+    }
+  };
+
+  const handleSignIn = async () => {
+    setAuthError(null);
+    try {
+      await signIn();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Sign in failed.";
+      setAuthError(message);
+    }
+  };
+
+  const handleSignOut = async () => {
+    setAuthError(null);
+    try {
+      await signOut();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Sign out failed.";
+      setAuthError(message);
     }
   };
 
@@ -133,9 +158,10 @@ const AppContent: React.FC = () => {
       <ProfileManager 
         currentUser={profile} 
         projects={projects} 
-        onSignIn={signIn} 
-        onSignOut={signOut} 
+        onSignIn={handleSignIn} 
+        onSignOut={handleSignOut} 
         onUpgradeToPro={handleUpgradeToPro}
+        authError={authError}
         billingError={billingError}
         onCreateProject={() => setActiveView(ActiveView.StoryIdeas)} 
         onLoadProject={(p) => {

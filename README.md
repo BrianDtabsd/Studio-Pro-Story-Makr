@@ -26,7 +26,7 @@ Optional `.env.local` billing/function overrides (recommended for Story Makr run
 - `CHRONOS_STRIPE_PRICE_ID`
 - `CHRONOS_STRIPE_SUCCESS_URL`
 - `CHRONOS_STRIPE_CANCEL_URL`
-- `CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE`
+- `GOOGLE_CLOUD_TTS_API_KEY`
 
 ## Chronos function wiring
 
@@ -50,10 +50,8 @@ The `Upgrade to Pro` action can open Stripe checkout through Chronos callable fu
 `window.APP_CONFIG` billing keys in `index.html`:
 
 - `CHRONOS_STRIPE_MODE`: `off` | `fallback` | `strict`
-  - `off`: skip checkout; local Pro is allowed only if `CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE` is `true`.
-  - `fallback`: try checkout first, then local Pro only when `CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE` is `true`.
-  - `strict`: checkout only (throws if checkout cannot start).
+  - `off`: disables upgrade checkout flow.
+  - `fallback` / `strict`: opens checkout and requires a valid redirect URL.
 - `CHRONOS_STRIPE_CHECKOUT_CALLABLE`: defaults to `createCheckoutSession`.
 - `CHRONOS_STRIPE_PRICE_ID`: Stripe price ID sent to checkout callable.
 - `CHRONOS_STRIPE_SUCCESS_URL` / `CHRONOS_STRIPE_CANCEL_URL`: optional redirect URLs.
-- `CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE`: defaults to `false`; set `true` only for explicit dev fallback testing.

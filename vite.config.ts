@@ -20,7 +20,7 @@ export default defineConfig(({ mode }) => {
         'process.env.CHRONOS_STRIPE_PRICE_ID': JSON.stringify(envOrEmpty('CHRONOS_STRIPE_PRICE_ID')),
         'process.env.CHRONOS_STRIPE_SUCCESS_URL': JSON.stringify(envOrEmpty('CHRONOS_STRIPE_SUCCESS_URL')),
         'process.env.CHRONOS_STRIPE_CANCEL_URL': JSON.stringify(envOrEmpty('CHRONOS_STRIPE_CANCEL_URL')),
-        'process.env.CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE': JSON.stringify(envOrEmpty('CHRONOS_STRIPE_ALLOW_LOCAL_PRO_UPGRADE'))
+        'process.env.GOOGLE_CLOUD_TTS_API_KEY': JSON.stringify(envOrEmpty('GOOGLE_CLOUD_TTS_API_KEY'))
       },
       resolve: {
         alias: {
