@@ -23,6 +23,8 @@ See `package.json` scripts:
 
 The app requires Google Sign-In via Firebase Auth (project: `chronos-video-forensics`). All features are gated behind authentication — the login screen is the first thing you see. To test features beyond login, a real Google account must authenticate through the popup flow.
 
+**Cloud VM limitation:** `signInWithPopup` (Firebase) cannot complete in headless/cloud environments. The Google OAuth popup opens but the sign-in flow cannot be finalized. All post-login features (story generation, script writing, TTS, image/video gen) require authenticated access. To test these features, either add a dev auth bypass or use a local machine with browser access.
+
 ### Key caveats
 
 - This Firebase project (`chronos-video-forensics`) is shared with another app. The Firebase config (in `firebase-applet-config.json`) and Firestore database ID (`ai-studio-37083281-...`) are hardcoded.
