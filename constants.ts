@@ -19,13 +19,13 @@ export const THUMBNAIL_MAKER_PLACEHOLDER = "Describe your YouTube thumbnail idea
 export const GCP_TTS_API_KEY_MISSING_MESSAGE = "TTS configuration error.";
 
 export const PRESET_VOICES_CONFIG: Record<PresetVoiceKey, PresetVoiceConfig> = {
-  Narrator_F: { key: 'Narrator_F', name: 'Aoede', displayName: "Narrator (Aoede - Warm)", languageCode: 'en-US', ssmlGender: 'FEMALE', type: "Gemini" },
-  Narrator_M: { key: 'Narrator_M', name: 'Fenrir', displayName: "Narrator (Fenrir - Deep)", languageCode: 'en-US', ssmlGender: 'MALE', type: "Gemini" },
-  Friendly_F: { key: 'Friendly_F', name: 'Kore', displayName: "Female (Kore - Friendly)", languageCode: 'en-US', ssmlGender: 'FEMALE', type: "Gemini" },
-  Friendly_M: { key: 'Friendly_M', name: 'Puck', displayName: "Male (Puck - Enthusiastic)", languageCode: 'en-US', ssmlGender: 'MALE', type: "Gemini" },
-  Professional_M: { key: 'Professional_M', name: 'Charon', displayName: "Male (Charon - Sophisticated)", languageCode: 'en-GB', ssmlGender: 'MALE', type: "Gemini" },
-  Young_F: { key: 'Young_F', name: 'Kore', displayName: "Youth Female (Kore)", languageCode: 'en-US', ssmlGender: 'FEMALE', type: "Gemini" },
-  Young_M: { key: 'Young_M', name: 'Puck', displayName: "Youth Male (Puck)", languageCode: 'en-US', ssmlGender: 'MALE', type: "Gemini" },
+  Narrator_F: { key: 'Narrator_F', name: 'Aoede', displayName: "Ava (Female Narrator)", languageCode: 'en-US', ssmlGender: 'FEMALE', type: "Gemini" },
+  Narrator_M: { key: 'Narrator_M', name: 'Charon', displayName: "James (Male Narrator - Deep)", languageCode: 'en-GB', ssmlGender: 'MALE', type: "Gemini" },
+  Friendly_F: { key: 'Friendly_F', name: 'Kore', displayName: "Emma (Female - Friendly)", languageCode: 'en-US', ssmlGender: 'FEMALE', type: "Gemini" },
+  Friendly_M: { key: 'Friendly_M', name: 'Puck', displayName: "Alex (Male - Energetic)", languageCode: 'en-US', ssmlGender: 'MALE', type: "Gemini" },
+  Professional_M: { key: 'Professional_M', name: 'Fenrir', displayName: "Michael (Male - Natural)", languageCode: 'en-US', ssmlGender: 'MALE', type: "Gemini" },
+  Young_F: { key: 'Young_F', name: 'Kore', displayName: "Mia (Young Female)", languageCode: 'en-US', ssmlGender: 'FEMALE', type: "Gemini" },
+  Young_M: { key: 'Young_M', name: 'Puck', displayName: "Noah (Young Male)", languageCode: 'en-US', ssmlGender: 'MALE', type: "Gemini" },
 };
 
 export const PRESET_VOICE_KEYS_ORDERED: PresetVoiceKey[] = [

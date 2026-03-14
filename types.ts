@@ -39,6 +39,7 @@ export interface Project {
 export interface ProjectState {
   projectId?: string;
   activeView: ActiveView;
+  lastEditorView?: ActiveView;
   storyIdeasKeywords: string;
   generatedStoryIdeas: StoryIdea[];
   selectedIdeaIds: string[];
