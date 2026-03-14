@@ -217,6 +217,22 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({
     return `${Math.floor(hrs / 24)}d ago`;
   };
 
+  const computedProgress = (project: Project) => {
+    const state = project.state;
+    if (!state) return Math.max(0, Math.min(100, project.progress || 0));
+    let progress = 0;
+    if (state.storyIdeasKeywords?.trim().length > 0 || state.generatedStoryIdeas?.length > 0) progress += 15;
+    if ((state.selectedIdeaIds?.length || 0) > 0 || !!state.storyForScripting) progress += 10;
+    if (Object.keys(state.sw_scriptOutlines || {}).some((k) => (state.sw_scriptOutlines[k] || '').trim().length > 0)) progress += 10;
+    if (Object.keys(state.sw_generatedScripts || {}).some((k) => (state.sw_generatedScripts[k] || '').trim().length > 0)) progress += 20;
+    if (Object.keys(state.analyzedScriptData || {}).some((k) => !!state.analyzedScriptData[k])) progress += 10;
+    if (Object.keys(state.audioChunks || {}).some((k) => (state.audioChunks[k] || []).some((c) => !!c.audioDataUrl))) progress += 15;
+    if (Object.keys(state.simg_sceneImageDefinitions || {}).some((k) => (state.simg_sceneImageDefinitions[k] || []).some((s) => !!s.generatedImageUrl || !!s.generatedVideoUrl))) progress += 10;
+    if (state.tm_generatedThumbnail) progress += 5;
+    if (Object.keys(state.tcg_titleCards || {}).some((k) => (state.tcg_titleCards[k] || []).length > 0)) progress += 5;
+    return Math.max(0, Math.min(100, progress));
+  };
+
   return (
     <div className="space-y-8 animate-in fade-in duration-700">
 
@@ -283,7 +299,9 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {projects.map(project => (
+              {projects.map(project => {
+                const progress = computedProgress(project);
+                return (
                 <div key={project.id} className="group relative neu-flat rounded-3xl hover:scale-[1.02] transition-all duration-500 flex flex-col overflow-hidden">
                   <div className="aspect-video neu-pressed relative overflow-hidden m-4 rounded-2xl">
                     {project.thumbnailUrl ? (
@@ -294,7 +312,7 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({
                       </div>
                     )}
                     <div className="absolute top-3 right-3 neu-flat px-2.5 py-1 rounded-full">
-                      <span className="text-[10px] font-black text-accent-orange">{project.progress}%</span>
+                      <span className="text-[10px] font-black text-accent-orange">{progress}%</span>
                     </div>
                   </div>
                   <div className="p-6 pt-2 space-y-3 flex-grow flex flex-col">
@@ -315,7 +333,8 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

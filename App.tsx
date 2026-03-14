@@ -32,6 +32,7 @@ const createDefaultProSettings = (): ProStorySettings => ({
 const createEmptyProjectState = (isProUser = false): ProjectState => ({
   projectId: undefined,
   activeView: ActiveView.Hub,
+  lastEditorView: undefined,
   storyIdeasKeywords: '',
   generatedStoryIdeas: [],
   selectedIdeaIds: [],
@@ -57,6 +58,9 @@ const createEmptyProjectState = (isProUser = false): ProjectState => ({
 const createProjectId = () =>
   `proj_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
+const isLocalMediaUrl = (url: string | undefined) =>
+  !!url && (url.startsWith('data:') || url.startsWith('blob:'));
+
 const stateHasPersistableContent = (state: ProjectState): boolean =>
   state.storyIdeasKeywords.trim().length > 0 ||
   state.generatedStoryIdeas.length > 0 ||
@@ -68,6 +72,40 @@ const stateHasPersistableContent = (state: ProjectState): boolean =>
   Object.keys(state.simg_sceneImageDefinitions).length > 0 ||
   !!state.tm_generatedThumbnail ||
   state.ffimg_generatedImages.length > 0;
+
+const hasGeneratedVisuals = (state: ProjectState): boolean =>
+  Object.values(state.simg_sceneImageDefinitions).some((scenes) =>
+    scenes.some((scene) => !!scene.generatedImageUrl || !!scene.generatedVideoUrl)
+  );
+
+const hasGeneratedAudio = (state: ProjectState): boolean =>
+  Object.values(state.audioChunks).some((chunks) =>
+    chunks.some((chunk) => !!chunk.audioDataUrl && chunk.audioDataUrl.trim().length > 0)
+  );
+
+const computeProjectProgress = (state: ProjectState): number => {
+  let progress = 0;
+  if (state.storyIdeasKeywords.trim().length > 0 || state.generatedStoryIdeas.length > 0) progress += 15;
+  if (state.selectedIdeaIds.length > 0 || !!state.storyForScripting) progress += 10;
+  if (Object.keys(state.sw_scriptOutlines).some((k) => state.sw_scriptOutlines[k].trim().length > 0)) progress += 10;
+  if (Object.keys(state.sw_generatedScripts).some((k) => state.sw_generatedScripts[k].trim().length > 0)) progress += 20;
+  if (Object.keys(state.analyzedScriptData).some((k) => !!state.analyzedScriptData[k])) progress += 10;
+  if (hasGeneratedAudio(state)) progress += 15;
+  if (hasGeneratedVisuals(state)) progress += 10;
+  if (!!state.tm_generatedThumbnail) progress += 5;
+  if (Object.keys(state.tcg_titleCards).some((k) => (state.tcg_titleCards[k] || []).length > 0)) progress += 5;
+  return Math.max(0, Math.min(100, progress));
+};
+
+const deriveResumeViewFromState = (state: ProjectState): ActiveView => {
+  const preferred = state.lastEditorView || state.activeView;
+  if (preferred && preferred !== ActiveView.Hub) return preferred;
+  if (hasGeneratedVisuals(state) || Object.keys(state.simg_sceneImageDefinitions).length > 0) return ActiveView.SceneImages;
+  if (hasGeneratedAudio(state) || Object.keys(state.analyzedScriptData).length > 0) return ActiveView.TextToSpeech;
+  if (Object.keys(state.sw_generatedScripts).length > 0 || Object.keys(state.sw_scriptOutlines).length > 0) return ActiveView.ScriptWriter;
+  if (state.generatedStoryIdeas.length > 0 || state.storyIdeasKeywords.trim().length > 0) return ActiveView.StoryIdeas;
+  return ActiveView.StoryIdeas;
+};
 
 const deriveProjectIdentity = (state: ProjectState): { id: string; title: string; description: string } | null => {
   if (!stateHasPersistableContent(state)) return null;
@@ -120,7 +158,7 @@ const AppContent: React.FC = () => {
   // so they never cause a document size overflow. Storage URLs (https://) pass through.
   const sanitizeStateForFirestore = (state: ProjectState): ProjectState => {
     const cleanUrl = (url: string | undefined) =>
-      !url || url.startsWith('data:') || url.startsWith('blob:') ? '' : url;
+      !url || isLocalMediaUrl(url) ? '' : url;
     return {
       ...state,
       simg_sceneImageDefinitions: Object.fromEntries(
@@ -157,6 +195,20 @@ const AppContent: React.FC = () => {
     }
   }, [profile]);
 
+  useEffect(() => {
+    setProjectState((prev) => {
+      const nextLastEditorView = activeView === ActiveView.Hub ? prev.lastEditorView : activeView;
+      if (prev.activeView === activeView && prev.lastEditorView === nextLastEditorView) {
+        return prev;
+      }
+      return {
+        ...prev,
+        activeView,
+        lastEditorView: nextLastEditorView,
+      };
+    });
+  }, [activeView]);
+
   const navItems: NavItem[] = [
     { id: ActiveView.Hub, label: 'Projects', icon: '📁' },
     { id: ActiveView.StoryIdeas, label: '1. Settings', icon: '⚙️' },
@@ -174,6 +226,24 @@ const AppContent: React.FC = () => {
   };
 
   const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+  const uploadAudioAssetWithRetry = async (
+    userId: string,
+    projectId: string,
+    chunkId: string,
+    audioUrl: string
+  ): Promise<string> => {
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await uploadAudioAsset(userId, projectId, chunkId, audioUrl);
+      } catch (error) {
+        if (attempt === maxAttempts) throw error;
+        await wait(350 * (2 ** (attempt - 1)));
+      }
+    }
+    throw new Error('Audio upload retry exhausted.');
+  };
 
   const isRetryableSaveError = (error: unknown): boolean => {
     const code = typeof (error as { code?: unknown })?.code === 'string'
@@ -218,15 +288,7 @@ const AppContent: React.FC = () => {
       title: identity.title,
       description: identity.description,
       lastModified: Date.now(),
-      progress: (() => {
-        let p = 0;
-        if (persistedState.storyForScripting || persistedState.generatedStoryIdeas.length > 0) p += 20;
-        if (Object.keys(persistedState.sw_generatedScripts).some(k => persistedState.sw_generatedScripts[k].length > 0)) p += 20;
-        if (Object.keys(persistedState.audioChunks).some(k => persistedState.audioChunks[k].length > 0)) p += 20;
-        if (Object.keys(persistedState.simg_sceneImageDefinitions).some(k => persistedState.simg_sceneImageDefinitions[k].length > 0)) p += 20;
-        if (persistedState.tm_generatedThumbnail) p += 20;
-        return Math.max(p, 5);
-      })(),
+      progress: computeProjectProgress(persistedState),
       state: sanitizeStateForFirestore(persistedState),
     };
 
@@ -294,23 +356,32 @@ const AppContent: React.FC = () => {
     setProjectState(prev => ({ ...prev, audioChunks: chunks }));
     const projectId = projectState.projectId || projectState.storyForScripting?.id;
     if (!user || !projectId) return;
-    const hasNewAudio = Object.values(chunks).some(list =>
-      list.some(c => c.audioDataUrl?.startsWith('blob:') || c.audioDataUrl?.startsWith('data:'))
+    const uploadCandidates = Object.entries(chunks).flatMap(([ideaId, list]) =>
+      list
+        .filter((chunk) => isLocalMediaUrl(chunk.audioDataUrl))
+        .map((chunk) => ({ ideaId, chunk }))
     );
-    if (!hasNewAudio) return;
-    const uploaded = { ...chunks };
-    for (const [ideaId, list] of Object.entries(chunks)) {
-      uploaded[ideaId] = await Promise.all(list.map(async chunk => {
-        if (chunk.audioDataUrl?.startsWith('blob:') || chunk.audioDataUrl?.startsWith('data:')) {
-          try {
-            const url = await uploadAudioAsset(user.uid, projectId, chunk.id, chunk.audioDataUrl);
-            return { ...chunk, audioDataUrl: url };
-          } catch { return chunk; }
-        }
-        return chunk;
-      }));
-    }
-    setProjectState(prev => ({ ...prev, audioChunks: uploaded }));
+    if (uploadCandidates.length === 0) return;
+
+    await Promise.all(uploadCandidates.map(async ({ ideaId, chunk }) => {
+      try {
+        const url = await uploadAudioAssetWithRetry(user.uid, projectId, chunk.id, chunk.audioDataUrl);
+        setProjectState((prev) => {
+          const existing = prev.audioChunks[ideaId] || [];
+          return {
+            ...prev,
+            audioChunks: {
+              ...prev.audioChunks,
+              [ideaId]: existing.map((existingChunk) =>
+                existingChunk.id === chunk.id ? { ...existingChunk, audioDataUrl: url } : existingChunk
+              )
+            }
+          };
+        });
+      } catch (error) {
+        console.error(`Audio upload failed for chunk ${chunk.id}:`, error);
+      }
+    }));
   };
 
   // Upload thumbnail to Storage immediately after generation.
@@ -345,9 +416,12 @@ const AppContent: React.FC = () => {
         onUpgradeToPro={handleUpgradeToPro}
         onCreateProject={handleCreateProject}
         onLoadProject={(p) => {
+          const resumeView = deriveResumeViewFromState(p.state);
           const loadedState: ProjectState = {
             ...p.state,
             projectId: p.state.projectId || p.id,
+            activeView: resumeView,
+            lastEditorView: p.state.lastEditorView || (resumeView !== ActiveView.Hub ? resumeView : undefined),
             isProUser: !!profile?.isPro || p.state.isProUser,
           };
           setProjectState(loadedState);
@@ -358,7 +432,7 @@ const AppContent: React.FC = () => {
             setProSettings(loadedSettings);
           }
           setSaveStatus('saved');
-          setActiveView(loadedState.activeView || ActiveView.StoryIdeas);
+          setActiveView(resumeView);
         }}
         onDeleteProject={deleteProject}
         onUpdateProfile={updateProfile}
