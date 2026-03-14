@@ -945,6 +945,7 @@ export const LandingPage: React.FC<Props> = ({ onSignIn }) => {
               <h2 style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 'clamp(36px, 6vw, 68px)', letterSpacing: '3px', color: '#fff', marginBottom: '36px', marginTop: 0 }}>
                 START FREE. SCALE WHEN READY.
               </h2>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', justifyContent: 'center' }}>
                 <div className="lp-glass" style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', borderRadius: '50px', padding: '8px 20px' }}>
                   <span style={{ fontSize: '12px', fontWeight: 600, color: billingAnnual ? '#ffad66' : 'rgba(232,236,240,0.3)', transition: 'color 0.2s' }}>Annual</span>
                   <button
@@ -954,19 +955,8 @@ export const LandingPage: React.FC<Props> = ({ onSignIn }) => {
                     aria-label={billingAnnual ? 'Billing: Annual' : 'Billing: Monthly'}
                     title="Toggle billing period"
                   >
-                <div className="lp-glass" style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', borderRadius: '50px', padding: '8px 20px' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: !billingCad ? '#ffad66' : 'rgba(232,236,240,0.3)', transition: 'color 0.2s' }}>USD</span>
-                  <button
-                    className="lp-toggle-track"
-                    onClick={() => setBillingCad((b: boolean) => !b)}
-                    aria-pressed={billingCad}
-                    aria-label={billingCad ? 'Currency: CAD' : 'Currency: USD'}
-                    title="Toggle currency"
-                  >
-                    <div className="lp-toggle-thumb" style={{ left: billingCad ? '22px' : '2px' }} />
+                    <div className="lp-toggle-thumb" style={{ left: billingAnnual ? '2px' : '22px' }} />
                   </button>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: billingCad ? '#ffad66' : 'rgba(232,236,240,0.3)', transition: 'color 0.2s' }}>CAD</span>
-                </div>
                   <span style={{ fontSize: '12px', fontWeight: 600, color: !billingAnnual ? '#ffad66' : 'rgba(232,236,240,0.3)', transition: 'color 0.2s' }}>Monthly</span>
                 </div>
 
