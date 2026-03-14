@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { SectionCard } from '../SectionCard.tsx';
 import { ActionButton } from '../common/ActionButton.tsx';
 import { ErrorDisplay } from '../ErrorDisplay.tsx';
-import { LoadingSpinner } from '../LoadingSpinner.tsx';
 import { analyzeScript, generateSpeech } from '../../services/geminiService.ts';
 import { AIAnalyzedScript, CharacterVoicePreset, SynthesizedChunk, PresetVoiceKey, ScriptType, StoryIdea } from '../../types.ts';
 import { PRESET_VOICES_CONFIG, PRESET_VOICE_KEYS_ORDERED } from '../../constants.ts';
@@ -18,6 +17,8 @@ interface Props {
   defaultVoiceKey: PresetVoiceKey;
   onDefaultVoiceKeyChange: (key: PresetVoiceKey) => void;
   characterVoicePresets: Record<string, CharacterVoicePreset>;
+  analyzedScripts: Record<string, AIAnalyzedScript | null>;
+  onAnalyzedScriptsChange: (scripts: Record<string, AIAnalyzedScript | null>) => void;
   audioChunks: Record<string, SynthesizedChunk[]>;
   onAudioChunksChange: (chunks: Record<string, SynthesizedChunk[]>) => void;
   onNavigateToNextStep: () => void;
@@ -25,7 +26,7 @@ interface Props {
 
 export const TextToSpeech: React.FC<Props> = ({
   story, selectedEpisodes, scripts, editableScripts, onEditableScriptsChange,
-  defaultVoiceKey, onDefaultVoiceKeyChange, characterVoicePresets,
+  defaultVoiceKey, onDefaultVoiceKeyChange, characterVoicePresets, analyzedScripts, onAnalyzedScriptsChange,
   audioChunks, onAudioChunksChange, onNavigateToNextStep
 }) => {
   const [loading, setLoading] = useState(false);
@@ -33,12 +34,14 @@ export const TextToSpeech: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [playingIndex, setPlayingIndex] = useState<number | null>(null);
   const [manualPlayingKey, setManualPlayingKey] = useState<string | null>(null);
-  const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(story?.id || null);
-  const [analyzedScripts, setAnalyzedScripts] = useState<Record<string, AIAnalyzedScript>>({});
+  const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(selectedEpisodes[0]?.id || story?.id || null);
   
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement | null }>({});
 
-  const activeStory = selectedEpisodes.find(e => e.id === activeEpisodeId) || story;
+  const activeStory =
+    selectedEpisodes.find((e) => e.id === activeEpisodeId) ||
+    selectedEpisodes[0] ||
+    story;
   const currentScript = activeStory ? (editableScripts[activeStory.id] || scripts[activeStory.id] || '') : '';
   const currentAnalyzedScript = activeStory ? analyzedScripts[activeStory.id] : null;
   const currentChunks = activeStory ? (audioChunks[activeStory.id] || []) : [];
@@ -50,7 +53,7 @@ export const TextToSpeech: React.FC<Props> = ({
     try {
       const chars = activeStory.proSettingsUsed?.characters || [];
       const result = await analyzeScript(currentScript, chars);
-      setAnalyzedScripts(prev => ({ ...prev, [activeStory.id]: result }));
+      onAnalyzedScriptsChange({ ...analyzedScripts, [activeStory.id]: result });
     } catch (e: any) {
       setError("Script analysis failed. Check your script format.");
     } finally {
@@ -95,15 +98,17 @@ export const TextToSpeech: React.FC<Props> = ({
     setSynthesizing(true);
     setError(null);
     try {
+      const nextAnalyzedScripts: Record<string, AIAnalyzedScript | null> = { ...analyzedScripts };
       for (const ep of selectedEpisodes) {
         const script = editableScripts[ep.id] || scripts[ep.id];
         if (!script) continue;
         
-        let analyzed = analyzedScripts[ep.id];
+        let analyzed = nextAnalyzedScripts[ep.id];
         if (!analyzed) {
           const chars = ep.proSettingsUsed?.characters || [];
           analyzed = await analyzeScript(script, chars);
-          setAnalyzedScripts(prev => ({ ...prev, [ep.id]: analyzed }));
+          nextAnalyzedScripts[ep.id] = analyzed;
+          onAnalyzedScriptsChange(nextAnalyzedScripts);
         }
         
         await synthesizeEpisode(ep.id, script, analyzed);
@@ -159,6 +164,16 @@ export const TextToSpeech: React.FC<Props> = ({
       setManualPlayingKey(null);
     });
   };
+
+  useEffect(() => {
+    setActiveEpisodeId((prev) => {
+      if (selectedEpisodes.length > 0) {
+        if (prev && selectedEpisodes.some((episode) => episode.id === prev)) return prev;
+        return selectedEpisodes[0].id;
+      }
+      return story?.id || null;
+    });
+  }, [selectedEpisodes, story?.id]);
 
   useEffect(() => {
     if (playingIndex !== null && playingIndex < currentChunks.length) {

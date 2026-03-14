@@ -115,8 +115,12 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {projects.map((project) => {
-              const progress = computeProjectProgress(project.state);
-              const stats = getWorkflowStats(project.state);
+              const progress = project.state
+                ? computeProjectProgress(project.state)
+                : Math.max(0, Math.min(100, project.progress || 0));
+              const stats = project.state
+                ? getWorkflowStats(project.state)
+                : { workflow: 'single' as const, episodeCount: 1, scriptCount: 0, audioCount: 0, visualCount: 0, resumeView: undefined };
               return (
                 <div key={project.id} className="group relative neu-flat rounded-3xl hover:scale-[1.02] transition-all duration-500 flex flex-col overflow-hidden">
                   <div className="aspect-video neu-pressed relative overflow-hidden m-4 rounded-2xl">

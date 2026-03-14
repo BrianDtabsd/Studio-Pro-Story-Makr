@@ -15,6 +15,7 @@ import CheckoutModal from './components/CheckoutModal';
 import { InfoBar } from './components/InfoBar.tsx';
 import { FirebaseProvider, useFirebase } from './FirebaseContext';
 import { uploadImageAsset, uploadAudioAsset } from './services/storageService';
+import { computeProjectProgress } from './projectProgress.ts';
 
 const createDefaultProSettings = (): ProStorySettings => ({
   contentStyle: ContentStyle.Drama,
@@ -82,20 +83,6 @@ const hasGeneratedAudio = (state: ProjectState): boolean =>
   Object.values(state.audioChunks).some((chunks) =>
     chunks.some((chunk) => !!chunk.audioDataUrl && chunk.audioDataUrl.trim().length > 0)
   );
-
-const computeProjectProgress = (state: ProjectState): number => {
-  let progress = 0;
-  if (state.storyIdeasKeywords.trim().length > 0 || state.generatedStoryIdeas.length > 0) progress += 15;
-  if (state.selectedIdeaIds.length > 0 || !!state.storyForScripting) progress += 10;
-  if (Object.keys(state.sw_scriptOutlines).some((k) => state.sw_scriptOutlines[k].trim().length > 0)) progress += 10;
-  if (Object.keys(state.sw_generatedScripts).some((k) => state.sw_generatedScripts[k].trim().length > 0)) progress += 20;
-  if (Object.keys(state.analyzedScriptData).some((k) => !!state.analyzedScriptData[k])) progress += 10;
-  if (hasGeneratedAudio(state)) progress += 15;
-  if (hasGeneratedVisuals(state)) progress += 10;
-  if (!!state.tm_generatedThumbnail) progress += 5;
-  if (Object.keys(state.tcg_titleCards).some((k) => (state.tcg_titleCards[k] || []).length > 0)) progress += 5;
-  return Math.max(0, Math.min(100, progress));
-};
 
 const deriveResumeViewFromState = (state: ProjectState): ActiveView => {
   const preferred = state.lastEditorView || state.activeView;
@@ -505,6 +492,8 @@ const AppContent: React.FC = () => {
           defaultVoiceKey={projectState.tts_defaultVoiceKey}
           onDefaultVoiceKeyChange={(v) => setProjectState(prev => ({ ...prev, tts_defaultVoiceKey: v }))}
           characterVoicePresets={projectState.tts_characterVoicePresets}
+          analyzedScripts={projectState.analyzedScriptData}
+          onAnalyzedScriptsChange={(s) => setProjectState(prev => ({ ...prev, analyzedScriptData: s }))}
           audioChunks={projectState.audioChunks}
           onAudioChunksChange={handleAudioChunksChange}
           onNavigateToNextStep={() => setActiveView(ActiveView.SceneImages)}

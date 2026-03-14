@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { SceneImageDefinition, StoryIdea, AIAnalyzedScript } from '../../types.ts';
 import { SectionCard } from '../SectionCard.tsx';
 import { TextAreaInput } from '../common/TextAreaInput.tsx';
@@ -31,12 +31,39 @@ export const SceneImageManager: React.FC<Props> = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(story?.id || null);
+  const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(selectedEpisodes[0]?.id || story?.id || null);
 
-  const activeStory = selectedEpisodes.find(e => e.id === activeEpisodeId) || story;
+  const activeStory =
+    selectedEpisodes.find((e) => e.id === activeEpisodeId) ||
+    selectedEpisodes[0] ||
+    story;
   const currentScript = activeStory ? (editableScripts[activeStory.id] || scripts[activeStory.id] || '') : '';
   const currentAnalyzedScript = activeStory ? analyzedScripts[activeStory.id] : null;
   const currentDefs = activeStory ? (sceneImageDefinitions[activeStory.id] || []) : [];
+
+  const IMAGE_TIMEOUT_MS = 150000;
+  const VIDEO_TIMEOUT_MS = 420000;
+  const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<T>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+    });
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  };
+
+  useEffect(() => {
+    setActiveEpisodeId((prev) => {
+      if (selectedEpisodes.length > 0) {
+        if (prev && selectedEpisodes.some((episode) => episode.id === prev)) return prev;
+        return selectedEpisodes[0].id;
+      }
+      return story?.id || null;
+    });
+  }, [selectedEpisodes, story?.id]);
 
   const handleAnalyze = async () => {
     if (!activeStory || !currentScript.trim()) return;
@@ -74,17 +101,26 @@ export const SceneImageManager: React.FC<Props> = ({
       onSceneImageDefinitionsChange({ ...sceneImageDefinitions, [activeStory.id]: newDefs });
     };
 
-    updateDef(sceneNum, { isGenerating: true });
+    updateDef(sceneNum, { isGenerating: true, generationError: undefined });
     try {
       if (type === 'image') {
-        const url = await generateImageForPrompt(`${def.userEditedPrompt} ${globalImageStylePrompt}`, activeStory.proSettingsUsed?.realisticImages);
-        updateDef(sceneNum, { generatedImageUrl: url, isGenerating: false });
+        const url = await withTimeout(
+          generateImageForPrompt(`${def.userEditedPrompt} ${globalImageStylePrompt}`, activeStory.proSettingsUsed?.realisticImages),
+          IMAGE_TIMEOUT_MS,
+          'Image generation timed out. Please retry or simplify the prompt.'
+        );
+        updateDef(sceneNum, { generatedImageUrl: url, isGenerating: false, generationError: undefined });
       } else {
-        const url = await generateVideoForPrompt(def.userEditedPrompt, '1080p', def.generatedImageUrl);
-        updateDef(sceneNum, { generatedVideoUrl: url, isGenerating: false });
+        const url = await withTimeout(
+          generateVideoForPrompt(def.userEditedPrompt, '1080p', def.generatedImageUrl),
+          VIDEO_TIMEOUT_MS,
+          'Video generation timed out. Please retry with a shorter, simpler motion prompt.'
+        );
+        updateDef(sceneNum, { generatedVideoUrl: url, isGenerating: false, generationError: undefined });
       }
     } catch (e: any) { 
-      updateDef(sceneNum, { isGenerating: false, generationError: e.message });
+      const message = e instanceof Error ? e.message : 'Generation failed. Please retry.';
+      updateDef(sceneNum, { isGenerating: false, generationError: message });
     }
   };
 

@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { generateScript } from '../../services/geminiService.ts'; 
 import { ActionButton } from '../common/ActionButton.tsx';
 import { TextAreaInput } from '../common/TextAreaInput.tsx';
@@ -37,11 +37,24 @@ export const ScriptWriter: React.FC<ScriptWriterProps> = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(story?.id || null);
+  const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(selectedEpisodes[0]?.id || story?.id || null);
 
-  const activeStory = selectedEpisodes.find(e => e.id === activeEpisodeId) || story;
+  const activeStory =
+    selectedEpisodes.find((e) => e.id === activeEpisodeId) ||
+    selectedEpisodes[0] ||
+    story;
   const currentOutline = activeStory ? (outlines[activeStory.id] || '') : '';
   const currentScript = activeStory ? (scripts[activeStory.id] || '') : '';
+
+  useEffect(() => {
+    setActiveEpisodeId((prev) => {
+      if (selectedEpisodes.length > 0) {
+        if (prev && selectedEpisodes.some((episode) => episode.id === prev)) return prev;
+        return selectedEpisodes[0].id;
+      }
+      return story?.id || null;
+    });
+  }, [selectedEpisodes, story?.id]);
 
   const handleGenerateFullScript = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
