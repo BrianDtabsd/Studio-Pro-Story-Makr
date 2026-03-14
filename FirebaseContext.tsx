@@ -1,8 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { httpsCallable } from 'firebase/functions';
-import { auth, db, functions, signInWithPopup, googleProvider, onAuthStateChanged, doc, getDoc, setDoc, collection, query, onSnapshot, deleteDoc, User } from './firebase';
-import { getAppConfig, getChronosStripeMode } from './appConfig';
+import { auth, db, signInWithPopup, googleProvider, onAuthStateChanged, doc, getDoc, setDoc, collection, query, onSnapshot, deleteDoc, User } from './firebase';
 import { UserProfile, Project } from './types';
+import { deleteProjectAssets } from './services/storageService';
 
 interface FirebaseContextType {
   user: User | null;
@@ -13,17 +12,11 @@ interface FirebaseContextType {
   signOut: () => Promise<void>;
   saveProject: (project: Project) => Promise<void>;
   deleteProject: (projectId: string) => Promise<void>;
+  updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
   upgradeToPro: () => Promise<void>;
 }
 
 const FirebaseContext = createContext<FirebaseContextType | undefined>(undefined);
-
-const pickFirstString = (...values: unknown[]): string | null => {
-  for (const value of values) {
-    if (typeof value === 'string' && value.trim().length > 0) return value;
-  }
-  return null;
-};
 
 export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -52,51 +45,62 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const eventId = authEventId;
       clearUserListeners();
       setUser(firebaseUser);
-      setLoading(true);
-      if (firebaseUser) {
-        try {
-          const profileRef = doc(db, 'users', firebaseUser.uid);
-          const userDoc = await getDoc(profileRef);
-          if (eventId !== authEventId) return;
 
-          if (!userDoc.exists()) {
-            const newProfile: UserProfile = {
-              username: firebaseUser.displayName || 'Anonymous',
-              avatarSeed: Math.random().toString(36).substring(7),
-              joinedDate: Date.now(),
-              isPro: false
-            };
-            await setDoc(profileRef, newProfile);
-          }
-          if (eventId !== authEventId) return;
-
-          // Live profile sync prevents stale state after checkout/webhook updates.
-          unsubscribeProfile = onSnapshot(profileRef, (snapshot) => {
-            setProfile(snapshot.exists() ? (snapshot.data() as UserProfile) : null);
-          }, (error) => {
-            console.error("Firestore Error (LIST profile):", error);
-          });
-
-          const q = query(collection(db, 'users', firebaseUser.uid, 'projects'));
-          unsubscribeProjects = onSnapshot(q, (snapshot) => {
-            const projectList = snapshot.docs.map(doc => doc.data() as Project);
-            setProjects(projectList.sort((a, b) => b.lastModified - a.lastModified));
-          }, (error) => {
-            console.error("Firestore Error (LIST projects):", error);
-          });
-        } catch (error) {
-          console.error("Auth bootstrap error:", error);
-          if (eventId === authEventId) {
-            setProfile(null);
-            setProjects([]);
-          }
-        } finally {
-          if (eventId === authEventId) setLoading(false);
-        }
-      } else {
+      if (!firebaseUser) {
         setProfile(null);
         setProjects([]);
         setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const profileRef = doc(db, 'users', firebaseUser.uid);
+        const userDoc = await getDoc(profileRef);
+        if (eventId !== authEventId) return;
+
+        if (userDoc.exists()) {
+          const data = userDoc.data();
+          setProfile({ ...data, isPro: data.plan === 'pro' } as UserProfile);
+        } else {
+          const newProfile: UserProfile = {
+            username: firebaseUser.displayName || 'Anonymous',
+            avatarSeed: Math.random().toString(36).substring(7),
+            joinedDate: Date.now(),
+            isPro: false
+          };
+          await setDoc(profileRef, newProfile);
+          if (eventId !== authEventId) return;
+          setProfile(newProfile);
+        }
+
+        // Real-time listener on user doc — updates profile instantly when
+        // the Stripe webhook writes plan: 'pro' to Firestore.
+        unsubscribeProfile = onSnapshot(profileRef, (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            setProfile({ ...data, isPro: data.plan === 'pro' } as UserProfile);
+          } else {
+            setProfile(null);
+          }
+        });
+
+        // Listen for projects
+        const q = query(collection(db, 'users', firebaseUser.uid, 'projects'));
+        unsubscribeProjects = onSnapshot(q, (snapshot) => {
+          const projectList = snapshot.docs.map(doc => doc.data() as Project);
+          setProjects(projectList.sort((a, b) => b.lastModified - a.lastModified));
+        }, (error) => {
+          console.error("Firestore Error (LIST projects):", error);
+        });
+      } catch (error) {
+        console.error("Auth bootstrap error:", error);
+        if (eventId === authEventId) {
+          setProfile(null);
+          setProjects([]);
+        }
+      } finally {
+        if (eventId === authEventId) setLoading(false);
       }
     });
 
@@ -112,85 +116,57 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       await signInWithPopup(auth, googleProvider);
     } catch (error) {
       console.error("Sign in error:", error);
-      throw error instanceof Error ? error : new Error(String(error));
     }
   };
 
   const signOutUser = async () => {
     try {
       await auth.signOut();
+
     } catch (error) {
       console.error("Sign out error:", error);
-      throw error instanceof Error ? error : new Error(String(error));
     }
   };
 
   const saveProject = async (project: Project) => {
-    if (!user) return;
+    if (!user) throw new Error('You must be signed in to save projects.');
     try {
       await setDoc(doc(db, 'users', user.uid, 'projects', project.id), project);
     } catch (error) {
       console.error("Firestore Error (SAVE project):", error);
+      throw error;
     }
   };
 
   const deleteProject = async (projectId: string) => {
     if (!user) return;
     try {
+      // Best-effort Storage cleanup — never blocks project deletion if it fails
+      await deleteProjectAssets(user.uid, projectId).catch(() => {});
       await deleteDoc(doc(db, 'users', user.uid, 'projects', projectId));
     } catch (error) {
       console.error("Firestore Error (DELETE project):", error);
     }
   };
 
-  const upgradeToPro = async () => {
-    if (!user || !profile) {
-      throw new Error("You must be signed in to upgrade.");
-    }
-
-    const stripeMode = getChronosStripeMode();
-    if (stripeMode === 'off') {
-      throw new Error("Upgrade is disabled. Enable CHRONOS_STRIPE_MODE.");
-    }
-    const appConfig = getAppConfig();
-    const priceId = appConfig.CHRONOS_STRIPE_PRICE_ID as string | undefined;
-    const checkoutCallableName = (appConfig.CHRONOS_STRIPE_CHECKOUT_CALLABLE as string | undefined) || 'createCheckoutSession';
-    const successUrl = (appConfig.CHRONOS_STRIPE_SUCCESS_URL as string | undefined) || window.location.href;
-    const cancelUrl = (appConfig.CHRONOS_STRIPE_CANCEL_URL as string | undefined) || window.location.href;
-    if (!priceId || priceId.trim().length === 0) {
-      throw new Error("Stripe price ID is missing. Set CHRONOS_STRIPE_PRICE_ID.");
-    }
-
+  const updateProfile = async (updates: Partial<UserProfile>) => {
+    if (!user) return;
     try {
-      const createCheckoutSession = httpsCallable(functions, checkoutCallableName, { timeout: 120000 });
-      const result = await createCheckoutSession({
-        priceId,
-        successUrl,
-        cancelUrl,
-        returnUrl: successUrl
-      });
-      const data = result.data as any;
-      const checkoutUrl = pickFirstString(
-        data?.url,
-        data?.checkoutUrl,
-        data?.checkoutSessionUrl,
-        data?.sessionUrl,
-        data?.data?.url
-      );
-      if (!checkoutUrl) {
-        throw new Error("Checkout session created without redirect URL.");
-      }
-      window.location.assign(checkoutUrl);
+      await setDoc(doc(db, 'users', user.uid), updates, { merge: true });
+      // onSnapshot listener on the user doc will pick up the change automatically.
     } catch (error) {
-      console.error("[Billing] Stripe checkout failed:", error);
-      throw error instanceof Error ? error : new Error(String(error));
+      console.error("Firestore Error (UPDATE profile):", error);
     }
   };
+
+  // Upgrade is handled via Stripe checkout — see CheckoutModal in App.tsx.
+  // This stub keeps the context interface stable.
+  const upgradeToPro = async () => {};
 
   return (
     <FirebaseContext.Provider value={{ 
       user, profile, projects, loading, 
-      signIn, signOut: signOutUser, saveProject, deleteProject, upgradeToPro 
+      signIn, signOut: signOutUser, saveProject, deleteProject, updateProfile, upgradeToPro
     }}>
       {children}
     </FirebaseContext.Provider>
