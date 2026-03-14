@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ActiveView, NavItem, StoryIdea, ScriptType, VideoGenreId, GeneratedImage, CharacterVoicePreset, ProStorySettings, STORY_SUB_GENRES, PresetVoiceKey, SceneImageDefinition, AIAnalyzedScript, TitleCardData, UserProfile, Project, ProjectState, ProductionProtocol, SynthesizedChunk, ContentStyle } from './types.ts';
 import { StoryIdeaGenerator } from './components/features/StoryIdeaGenerator.tsx';
 import { ScriptWriter } from './components/features/ScriptWriter.tsx';
@@ -48,6 +48,7 @@ const AppContent: React.FC = () => {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [checkoutPriceId, setCheckoutPriceId] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const saveAttemptRef = useRef(0);
 
   // After sign-in: check for a pending checkout the user initiated from the landing page
   useEffect(() => {
@@ -133,37 +134,80 @@ const AppContent: React.FC = () => {
     setCheckoutPriceId('price_1TAG2vAHxmIA77jAagUXCyht');
   };
 
+  const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+  const isRetryableSaveError = (error: unknown): boolean => {
+    const code = typeof (error as { code?: unknown })?.code === 'string'
+      ? String((error as { code?: string }).code).toLowerCase()
+      : '';
+    return (
+      code.includes('unavailable') ||
+      code.includes('deadline-exceeded') ||
+      code.includes('aborted') ||
+      code.includes('resource-exhausted') ||
+      code.includes('internal')
+    );
+  };
+
   // Auto-save project state — debounced 2s after any state change.
   // Sanitizes state before writing so base64/blob URLs never hit Firestore.
   useEffect(() => {
+    if (!user || !projectState.storyForScripting) return;
+
+    const saveAttemptId = ++saveAttemptRef.current;
+    let cancelled = false;
+
+    // Mark current draft as unsaved while debounce/retry pipeline runs.
+    setSaveStatus((prev) => (prev === 'saving' ? prev : 'idle'));
+
+    const project: Project = {
+      id: projectState.storyForScripting.id,
+      title: projectState.storyForScripting.title,
+      description: projectState.storyForScripting.description,
+      lastModified: Date.now(),
+      progress: (() => {
+        let p = 0;
+        if (projectState.storyForScripting) p += 20;
+        if (Object.keys(projectState.sw_generatedScripts).some(k => projectState.sw_generatedScripts[k].length > 0)) p += 20;
+        if (Object.keys(projectState.audioChunks).some(k => projectState.audioChunks[k].length > 0)) p += 20;
+        if (Object.keys(projectState.simg_sceneImageDefinitions).some(k => projectState.simg_sceneImageDefinitions[k].length > 0)) p += 20;
+        if (projectState.tm_generatedThumbnail) p += 20;
+        return Math.max(p, 5);
+      })(),
+      state: sanitizeStateForFirestore(projectState),
+    };
+
     const save = async () => {
-      if (!user || !projectState.storyForScripting) return;
+      const maxAttempts = 3;
+      const retryBaseDelayMs = 350;
       setSaveStatus('saving');
-      try {
-        const project: Project = {
-          id: projectState.storyForScripting.id,
-          title: projectState.storyForScripting.title,
-          description: projectState.storyForScripting.description,
-          lastModified: Date.now(),
-          progress: (() => {
-            let p = 0;
-            if (projectState.storyForScripting) p += 20;
-            if (Object.keys(projectState.sw_generatedScripts).some(k => projectState.sw_generatedScripts[k].length > 0)) p += 20;
-            if (Object.keys(projectState.audioChunks).some(k => projectState.audioChunks[k].length > 0)) p += 20;
-            if (Object.keys(projectState.simg_sceneImageDefinitions).some(k => projectState.simg_sceneImageDefinitions[k].length > 0)) p += 20;
-            if (projectState.tm_generatedThumbnail) p += 20;
-            return Math.max(p, 5);
-          })(),
-          state: sanitizeStateForFirestore(projectState),
-        };
-        await saveProject(project);
-        setSaveStatus('saved');
-      } catch {
-        setSaveStatus('error');
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          await saveProject(project);
+          if (!cancelled && saveAttemptId === saveAttemptRef.current) {
+            setSaveStatus('saved');
+          }
+          return;
+        } catch (error) {
+          const shouldRetry = attempt < maxAttempts && isRetryableSaveError(error);
+          if (!shouldRetry) {
+            if (!cancelled && saveAttemptId === saveAttemptRef.current) {
+              setSaveStatus('error');
+            }
+            return;
+          }
+          await wait(retryBaseDelayMs * (2 ** (attempt - 1)));
+          if (cancelled || saveAttemptId !== saveAttemptRef.current) return;
+        }
       }
     };
-    const timeoutId = setTimeout(save, 2000);
-    return () => clearTimeout(timeoutId);
+
+    const timeoutId = setTimeout(() => { void save(); }, 2000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
   }, [projectState, user, saveProject]);
 
   // Upload scene images to Storage immediately after generation.
