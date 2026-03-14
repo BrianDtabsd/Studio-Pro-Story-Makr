@@ -28,6 +28,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     let unsubscribeProfile: (() => void) | null = null;
     let unsubscribeProjects: (() => void) | null = null;
     let authEventId = 0;
+    let warnedProjectsPermission = false;
 
     const clearUserListeners = () => {
       if (unsubscribeProfile) {
@@ -92,6 +93,15 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           setProjects(projectList.sort((a, b) => b.lastModified - a.lastModified));
         }, (error) => {
           console.error("Firestore Error (LIST projects):", error);
+          const code = typeof (error as { code?: unknown })?.code === 'string'
+            ? String((error as { code?: string }).code).toLowerCase()
+            : '';
+          if (code.includes('permission-denied') && !warnedProjectsPermission) {
+            warnedProjectsPermission = true;
+            console.error(
+              "Projects read denied by Firestore rules. Confirm this signed-in UID can read users/{uid}/projects in the deployed ruleset/database."
+            );
+          }
         });
       } catch (error) {
         console.error("Auth bootstrap error:", error);
