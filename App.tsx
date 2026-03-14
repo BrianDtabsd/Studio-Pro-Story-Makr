@@ -13,37 +13,87 @@ import { ProjectExport } from './components/features/ProjectExport.tsx';
 import { LandingPage } from './components/LandingPage.tsx';
 import CheckoutModal from './components/CheckoutModal';
 import { InfoBar } from './components/InfoBar.tsx';
-import { ActionButton } from './components/common/ActionButton.tsx';
 import { FirebaseProvider, useFirebase } from './FirebaseContext';
 import { uploadImageAsset, uploadAudioAsset } from './services/storageService';
+
+const createDefaultProSettings = (): ProStorySettings => ({
+  contentStyle: ContentStyle.Drama,
+  topics: [],
+  characterCount: 1,
+  subGenre: STORY_SUB_GENRES[0].id,
+  characters: [],
+  primarySetting: '',
+  incitingIncidentIdea: '',
+  productionProtocol: ProductionProtocol.Cinematic,
+  videoBudget: 3,
+  realisticImages: false
+});
+
+const createEmptyProjectState = (isProUser = false): ProjectState => ({
+  projectId: undefined,
+  activeView: ActiveView.Hub,
+  storyIdeasKeywords: '',
+  generatedStoryIdeas: [],
+  selectedIdeaIds: [],
+  isProUser,
+  storyForScripting: null,
+  sw_scriptOutlines: {},
+  sw_generatedScripts: {},
+  sw_selectedScriptType: ScriptType.SingleVoice,
+  simg_sceneImageDefinitions: {},
+  simg_globalImageStylePrompt: 'Cinematic, high-detail, dramatic lighting, 8k resolution',
+  tts_editableScripts: {},
+  tts_defaultVoiceKey: 'Narrator_M',
+  tts_characterVoicePresets: {},
+  tcg_titleCards: {},
+  ffimg_prompt: '',
+  ffimg_generatedImages: [],
+  tm_prompt: '',
+  tm_generatedThumbnail: null,
+  analyzedScriptData: {},
+  audioChunks: {},
+});
+
+const createProjectId = () =>
+  `proj_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+const stateHasPersistableContent = (state: ProjectState): boolean =>
+  state.storyIdeasKeywords.trim().length > 0 ||
+  state.generatedStoryIdeas.length > 0 ||
+  state.selectedIdeaIds.length > 0 ||
+  !!state.storyForScripting ||
+  Object.keys(state.sw_scriptOutlines).length > 0 ||
+  Object.keys(state.sw_generatedScripts).length > 0 ||
+  Object.keys(state.audioChunks).length > 0 ||
+  Object.keys(state.simg_sceneImageDefinitions).length > 0 ||
+  !!state.tm_generatedThumbnail ||
+  state.ffimg_generatedImages.length > 0;
+
+const deriveProjectIdentity = (state: ProjectState): { id: string; title: string; description: string } | null => {
+  if (!stateHasPersistableContent(state)) return null;
+
+  const idea =
+    state.storyForScripting ||
+    state.generatedStoryIdeas.find((i) => state.selectedIdeaIds.includes(i.id)) ||
+    state.generatedStoryIdeas.find((i) => !i.isSeriesConcept) ||
+    state.generatedStoryIdeas[0];
+
+  const fallbackTitle = state.storyIdeasKeywords.trim().slice(0, 80);
+  const fallbackDescription = state.storyIdeasKeywords.trim().slice(0, 500);
+  const title = (idea?.title || fallbackTitle || 'Untitled Project').trim();
+  const description = (idea?.description || fallbackDescription || 'Story project draft').trim();
+  return {
+    id: state.projectId || createProjectId(),
+    title,
+    description,
+  };
+};
 
 const AppContent: React.FC = () => {
   const { user, profile, projects, loading: firebaseLoading, signIn, signOut, saveProject, deleteProject, updateProfile } = useFirebase();
   const [activeView, setActiveView] = useState<ActiveView>(ActiveView.Hub);
   
-  const [projectState, setProjectState] = useState<ProjectState>({
-    activeView: ActiveView.Hub,
-    storyIdeasKeywords: '',
-    generatedStoryIdeas: [],
-    selectedIdeaIds: [],
-    isProUser: false,
-    storyForScripting: null,
-    sw_scriptOutlines: {},
-    sw_generatedScripts: {},
-    sw_selectedScriptType: ScriptType.SingleVoice,
-    simg_sceneImageDefinitions: {},
-    simg_globalImageStylePrompt: 'Cinematic, high-detail, dramatic lighting, 8k resolution',
-    tts_editableScripts: {},
-    tts_defaultVoiceKey: 'Narrator_M',
-    tts_characterVoicePresets: {},
-    tcg_titleCards: {},
-    ffimg_prompt: '',
-    ffimg_generatedImages: [],
-    tm_prompt: '',
-    tm_generatedThumbnail: null,
-    analyzedScriptData: {},
-    audioChunks: {},
-  });
+  const [projectState, setProjectState] = useState<ProjectState>(() => createEmptyProjectState(false));
 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [checkoutPriceId, setCheckoutPriceId] = useState<string | null>(null);
@@ -95,18 +145,7 @@ const AppContent: React.FC = () => {
     };
   };
 
-  const [proSettings, setProSettings] = useState<ProStorySettings>({ 
-    contentStyle: ContentStyle.Drama,
-    topics: [],
-    characterCount: 1,
-    subGenre: STORY_SUB_GENRES[0].id, 
-    characters: [], 
-    primarySetting: '', 
-    incitingIncidentIdea: '', 
-    productionProtocol: ProductionProtocol.Cinematic, 
-    videoBudget: 3, 
-    realisticImages: false 
-  });
+  const [proSettings, setProSettings] = useState<ProStorySettings>(() => createDefaultProSettings());
 
   // Veo video generation is Phase 2 — images work now, video coming soon
   const hasVeoKey = true;
@@ -152,7 +191,21 @@ const AppContent: React.FC = () => {
   // Auto-save project state — debounced 2s after any state change.
   // Sanitizes state before writing so base64/blob URLs never hit Firestore.
   useEffect(() => {
-    if (!user || !projectState.storyForScripting) return;
+    if (!user) return;
+    if (!stateHasPersistableContent(projectState)) return;
+
+    const persistedState: ProjectState = {
+      ...projectState,
+      activeView,
+      projectId: projectState.projectId || createProjectId(),
+    };
+    if (!projectState.projectId) {
+      setProjectState((prev) =>
+        prev.projectId ? prev : { ...prev, projectId: persistedState.projectId }
+      );
+    }
+    const identity = deriveProjectIdentity(persistedState);
+    if (!identity) return;
 
     const saveAttemptId = ++saveAttemptRef.current;
     let cancelled = false;
@@ -161,20 +214,20 @@ const AppContent: React.FC = () => {
     setSaveStatus((prev) => (prev === 'saving' ? prev : 'idle'));
 
     const project: Project = {
-      id: projectState.storyForScripting.id,
-      title: projectState.storyForScripting.title,
-      description: projectState.storyForScripting.description,
+      id: identity.id,
+      title: identity.title,
+      description: identity.description,
       lastModified: Date.now(),
       progress: (() => {
         let p = 0;
-        if (projectState.storyForScripting) p += 20;
-        if (Object.keys(projectState.sw_generatedScripts).some(k => projectState.sw_generatedScripts[k].length > 0)) p += 20;
-        if (Object.keys(projectState.audioChunks).some(k => projectState.audioChunks[k].length > 0)) p += 20;
-        if (Object.keys(projectState.simg_sceneImageDefinitions).some(k => projectState.simg_sceneImageDefinitions[k].length > 0)) p += 20;
-        if (projectState.tm_generatedThumbnail) p += 20;
+        if (persistedState.storyForScripting || persistedState.generatedStoryIdeas.length > 0) p += 20;
+        if (Object.keys(persistedState.sw_generatedScripts).some(k => persistedState.sw_generatedScripts[k].length > 0)) p += 20;
+        if (Object.keys(persistedState.audioChunks).some(k => persistedState.audioChunks[k].length > 0)) p += 20;
+        if (Object.keys(persistedState.simg_sceneImageDefinitions).some(k => persistedState.simg_sceneImageDefinitions[k].length > 0)) p += 20;
+        if (persistedState.tm_generatedThumbnail) p += 20;
         return Math.max(p, 5);
       })(),
-      state: sanitizeStateForFirestore(projectState),
+      state: sanitizeStateForFirestore(persistedState),
     };
 
     const save = async () => {
@@ -208,14 +261,14 @@ const AppContent: React.FC = () => {
       cancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [projectState, user, saveProject]);
+  }, [activeView, projectState, user, saveProject]);
 
   // Upload scene images to Storage immediately after generation.
   // Optimistic: state updates instantly with base64 for UI, then updates again
   // with the permanent Storage URL once upload completes.
   const handleSceneImageDefinitionsChange = async (definitions: Record<string, SceneImageDefinition[]>) => {
     setProjectState(prev => ({ ...prev, simg_sceneImageDefinitions: definitions }));
-    const projectId = projectState.storyForScripting?.id;
+    const projectId = projectState.projectId || projectState.storyForScripting?.id;
     if (!user || !projectId) return;
     const hasNewBase64 = Object.values(definitions).some(scenes =>
       scenes.some(s => s.generatedImageUrl?.startsWith('data:'))
@@ -239,7 +292,7 @@ const AppContent: React.FC = () => {
   // Upload audio chunks to Storage immediately after generation.
   const handleAudioChunksChange = async (chunks: Record<string, SynthesizedChunk[]>) => {
     setProjectState(prev => ({ ...prev, audioChunks: chunks }));
-    const projectId = projectState.storyForScripting?.id;
+    const projectId = projectState.projectId || projectState.storyForScripting?.id;
     if (!user || !projectId) return;
     const hasNewAudio = Object.values(chunks).some(list =>
       list.some(c => c.audioDataUrl?.startsWith('blob:') || c.audioDataUrl?.startsWith('data:'))
@@ -263,12 +316,19 @@ const AppContent: React.FC = () => {
   // Upload thumbnail to Storage immediately after generation.
   const handleThumbnailChange = async (thumbnail: GeneratedImage | null) => {
     setProjectState(prev => ({ ...prev, tm_generatedThumbnail: thumbnail }));
-    const projectId = projectState.storyForScripting?.id;
+    const projectId = projectState.projectId || projectState.storyForScripting?.id;
     if (!user || !projectId || !thumbnail?.src?.startsWith('data:')) return;
     try {
       const url = await uploadImageAsset(user.uid, projectId, 'thumbnail', thumbnail.src, 0.75);
       setProjectState(prev => ({ ...prev, tm_generatedThumbnail: { ...thumbnail, src: url } }));
     } catch { /* keep base64 in memory, sanitizer strips it from Firestore */ }
+  };
+
+  const handleCreateProject = () => {
+    setProjectState(createEmptyProjectState(!!profile?.isPro));
+    setProSettings(createDefaultProSettings());
+    setSaveStatus('idle');
+    setActiveView(ActiveView.StoryIdeas);
   };
 
   const renderView = () => {
@@ -283,10 +343,22 @@ const AppContent: React.FC = () => {
         onSignIn={signIn}
         onSignOut={signOut}
         onUpgradeToPro={handleUpgradeToPro}
-        onCreateProject={() => setActiveView(ActiveView.StoryIdeas)}
+        onCreateProject={handleCreateProject}
         onLoadProject={(p) => {
-          setProjectState(p.state);
-          setActiveView(p.state.activeView || ActiveView.StoryIdeas);
+          const loadedState: ProjectState = {
+            ...p.state,
+            projectId: p.state.projectId || p.id,
+            isProUser: !!profile?.isPro || p.state.isProUser,
+          };
+          setProjectState(loadedState);
+          const loadedSettings =
+            loadedState.storyForScripting?.proSettingsUsed ||
+            loadedState.generatedStoryIdeas.find((idea) => idea.proSettingsUsed)?.proSettingsUsed;
+          if (loadedSettings) {
+            setProSettings(loadedSettings);
+          }
+          setSaveStatus('saved');
+          setActiveView(loadedState.activeView || ActiveView.StoryIdeas);
         }}
         onDeleteProject={deleteProject}
         onUpdateProfile={updateProfile}
@@ -314,6 +386,8 @@ const AppContent: React.FC = () => {
           onIdeasGenerated={(k, i) => { 
             setProjectState(prev => ({ 
               ...prev, 
+              projectId: prev.projectId || createProjectId(),
+              activeView: ActiveView.StoryIdeas,
               storyIdeasKeywords: k, 
               generatedStoryIdeas: i, 
               selectedIdeaIds: [] 
@@ -322,7 +396,7 @@ const AppContent: React.FC = () => {
           onProceedToScripting={() => { 
             const s = projectState.generatedStoryIdeas.find(x => x.id === projectState.selectedIdeaIds[0]); 
             if (s) { 
-              setProjectState(prev => ({ ...prev, storyForScripting: s }));
+              setProjectState(prev => ({ ...prev, storyForScripting: s, activeView: ActiveView.ScriptWriter }));
               setActiveView(ActiveView.ScriptWriter); 
             } 
           }} 
@@ -417,7 +491,10 @@ const AppContent: React.FC = () => {
             {navItems.map(item => (
               <button 
                 key={item.id}
-                onClick={() => setActiveView(item.id)}
+                onClick={() => {
+                  setActiveView(item.id);
+                  setProjectState(prev => ({ ...prev, activeView: item.id }));
+                }}
                 className={`neu-btn px-6 py-2 font-medium relative ${activeView === item.id ? 'text-neu-text-dark font-bold' : 'text-neu-text hover:text-neu-text-dark'}`}
               >
                 {item.label}
@@ -431,7 +508,7 @@ const AppContent: React.FC = () => {
 
         {user && (
           <div className="flex items-center gap-4 mt-4 md:mt-0">
-            {projectState.storyForScripting && (
+            {projectState.projectId && (
               <span className={`text-[10px] font-bold uppercase tracking-widest transition-all ${
                 saveStatus === 'saving' ? 'text-amber-500 animate-pulse' :
                 saveStatus === 'saved'  ? 'text-emerald-500' :

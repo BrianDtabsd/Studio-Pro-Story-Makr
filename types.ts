@@ -37,6 +37,7 @@ export interface Project {
 }
 
 export interface ProjectState {
+  projectId?: string;
   activeView: ActiveView;
   storyIdeasKeywords: string;
   generatedStoryIdeas: StoryIdea[];

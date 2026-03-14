@@ -19,39 +19,21 @@ View your app in AI Studio: https://ai.studio/apps/37083281-4446-4ce5-823b-46bc1
 3. Run the app:
    `npm run dev`
 
-Optional `.env.local` billing/function overrides (recommended for Story Makr runtime wiring):
-- `CHRONOS_FUNCTIONS_MODE`
-- `CHRONOS_STRIPE_MODE`
-- `CHRONOS_STRIPE_CHECKOUT_CALLABLE`
-- `CHRONOS_STRIPE_PRICE_ID`
-- `CHRONOS_STRIPE_SUCCESS_URL`
-- `CHRONOS_STRIPE_CANCEL_URL`
-- `GOOGLE_CLOUD_TTS_API_KEY`
+## Production reliability checklist
 
-## Chronos function wiring
+1. **Firebase Auth domains**
+   - In Firebase Console → Authentication → Settings → Authorized domains, add every runtime domain you use (for example: `localhost`, `127.0.0.1`, preview/staging domains, production domain).
 
-Story Makr calls Firebase callable functions first (from the Firebase project configured in `firebase-applet-config.json`), then falls back to direct Gemini calls when configured for fallback mode.
+2. **Firestore rules deployment**
+   - This repo includes `firestore.rules`, `firebase.json`, and `firestore.indexes.json` configured for both `(default)` and `ai-studio-37083281-4446-4ce5-823b-46bc1f882dbc` databases.
+   - Deploy rules from project root:
+     - `firebase deploy --only firestore:rules --project chronos-video-forensics`
 
-`window.APP_CONFIG` controls this behavior in `index.html`:
-(`.env.local` values with the same keys override `window.APP_CONFIG` at runtime.)
+3. **Required runtime keys**
+   - `.env.local` must include:
+     - `GEMINI_API_KEY`
+     - `VITE_STRIPE_PUBLISHABLE_KEY` (for embedded Stripe checkout)
 
-- `CHRONOS_FUNCTIONS_MODE`: `off` | `fallback` | `strict`
-  - `off`: skip callable functions and always use direct Gemini.
-  - `fallback`: try callable functions first, then direct Gemini if callable fails.
-  - `strict`: callable functions only (throws on callable failure).
-- `CHRONOS_CALLABLE_NAMES`: override callable function names without code changes.
-  - Default mapping targets Chronos names `generateImage` and `generateVideo` for image/video calls.
-  - The default mode in `index.html` is `strict` for foundation-first behavior.
-
-### Stripe checkout wiring
-
-The `Upgrade to Pro` action can open Stripe checkout through Chronos callable function `createCheckoutSession`.
-
-`window.APP_CONFIG` billing keys in `index.html`:
-
-- `CHRONOS_STRIPE_MODE`: `off` | `fallback` | `strict`
-  - `off`: disables upgrade checkout flow.
-  - `fallback` / `strict`: opens checkout and requires a valid redirect URL.
-- `CHRONOS_STRIPE_CHECKOUT_CALLABLE`: defaults to `createCheckoutSession`.
-- `CHRONOS_STRIPE_PRICE_ID`: Stripe price ID sent to checkout callable.
-- `CHRONOS_STRIPE_SUCCESS_URL` / `CHRONOS_STRIPE_CANCEL_URL`: optional redirect URLs.
+4. **Cloud Function auth expectations**
+   - Callable generation endpoints require Firebase auth.
+   - App now falls back to direct Gemini generation when callable auth/permission/unavailable errors occur, but production should still keep callable auth healthy.
