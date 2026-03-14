@@ -982,7 +982,7 @@ export const LandingPage: React.FC<Props> = ({ onSignIn }) => {
               </div>
 
               {billingAnnual && (
-                <p style={{ marginTop: '14px', marginBottom: 0, fontSize: '11px', color: 'rgba(255,173,102,0.5)', fontStyle: 'italic' }}>
+                <p style={{ marginTop: '14px', marginBottom: 0, fontSize: '11px', color: 'rgba(255,173,102,0.5)' }}>
                   Annual plan billed as one payment — {billingCad ? 'CA$468 / year' : 'US$348 / year'}
                 </p>
               )}
@@ -1048,13 +1048,13 @@ export const LandingPage: React.FC<Props> = ({ onSignIn }) => {
                 {!billingAnnual && (
                   <p style={{ fontSize: '11px', color: 'rgba(232,236,240,0.3)', marginBottom: '6px', marginTop: 0 }}>
                     Save with annual —{' '}
-                    <button onClick={() => setBillingAnnual(true)} style={{ background: 'none', border: 'none', padding: 0, color: '#ffad66', fontSize: '11px', cursor: 'pointer', fontStyle: 'italic' }}>
+                    <button onClick={() => setBillingAnnual(true)} style={{ background: 'none', border: 'none', padding: 0, color: '#ffad66', fontSize: '11px', cursor: 'pointer' }}>
                       {billingCad ? '$39/mo' : '$29/mo'} billed annually
                     </button>
                   </p>
                 )}
 
-                <p style={{ fontSize: '11px', color: 'rgba(255,173,102,0.45)', marginBottom: '28px', marginTop: '4px', fontStyle: 'italic' }}>
+                <p style={{ fontSize: '11px', color: 'rgba(255,173,102,0.45)', marginBottom: '28px', marginTop: '4px' }}>
                   {billingAnnual ? 'Grand Opening rate' : 'Flexible month-to-month'}
                 </p>
 
