@@ -6,7 +6,7 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     const envOrEmpty = (key: string) => env[key] || '';
     const firstEnv = (...keys: string[]) => keys.map(envOrEmpty).find((v) => v.trim().length > 0) || '';
-    const geminiApiKey = firstEnv('GEMINI_API_KEY', 'VITE_GEMINI_API_KEY', 'API_KEY', 'VITE_API_KEY');
+    const geminiApiKey = firstEnv('GEMINI_API_KEY', 'VITE_GEMINI_API_KEY');
     return {
       server: {
         port: 3000,
