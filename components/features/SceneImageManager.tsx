@@ -65,6 +65,18 @@ export const SceneImageManager: React.FC<Props> = ({
     });
   }, [selectedEpisodes, story?.id]);
 
+  // Safety reset: if a project is reopened after abandoning generation, clear stale
+  // in-progress flags so the UI never remains in a permanent spinner state.
+  useEffect(() => {
+    if (!activeStory) return;
+    if (!currentDefs.some((def) => def.isGenerating)) return;
+    const resetDefs = currentDefs.map((def) => ({ ...def, isGenerating: false }));
+    onSceneImageDefinitionsChange({
+      ...sceneImageDefinitions,
+      [activeStory.id]: resetDefs,
+    });
+  }, [activeStory, currentDefs, onSceneImageDefinitionsChange, sceneImageDefinitions]);
+
   const handleAnalyze = async () => {
     if (!activeStory || !currentScript.trim()) return;
     setLoading(true);
