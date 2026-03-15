@@ -19,6 +19,24 @@ View your app in AI Studio: https://ai.studio/apps/37083281-4446-4ce5-823b-46bc1
 3. Run the app:
    `npm run dev`
 
+## GitHub safety workflow (must-follow)
+
+If code changes are not showing in browser, do this before making new edits:
+1. `git branch --show-current`
+2. `git fetch origin`
+3. `git rev-list --left-right --count origin/main...origin/<working-branch>`
+4. `gh pr list --state open --base main`
+
+Then:
+1. Merge the active PR into `main` (prefer Squash and merge).
+2. Pull latest `main` locally:
+   - `git fetch origin`
+   - `git switch main`
+   - `git pull origin main`
+3. Restart the dev server and retest.
+
+Detailed branch/PR incident protocol is maintained in `AGENTS.md`.
+
 ## Production reliability checklist
 
 1. **Firebase Auth domains**

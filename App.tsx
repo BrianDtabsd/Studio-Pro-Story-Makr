@@ -114,6 +114,16 @@ const deriveProjectIdentity = (state: ProjectState): { id: string; title: string
   };
 };
 
+const clearStaleGenerationFlags = (state: ProjectState): ProjectState => ({
+  ...state,
+  simg_sceneImageDefinitions: Object.fromEntries(
+    Object.entries(state.simg_sceneImageDefinitions).map(([ideaId, scenes]) => [
+      ideaId,
+      scenes.map((scene) => ({ ...scene, isGenerating: false })),
+    ])
+  ),
+});
+
 const AppContent: React.FC = () => {
   const { user, profile, projects, loading: firebaseLoading, signIn, signOut, saveProject, deleteProject, updateProfile } = useFirebase();
   const [activeView, setActiveView] = useState<ActiveView>(ActiveView.Hub);
@@ -150,7 +160,7 @@ const AppContent: React.FC = () => {
       ...state,
       simg_sceneImageDefinitions: Object.fromEntries(
         Object.entries(state.simg_sceneImageDefinitions).map(([id, scenes]) => [
-          id, scenes.map(s => ({ ...s, generatedImageUrl: cleanUrl(s.generatedImageUrl), generatedVideoUrl: cleanUrl(s.generatedVideoUrl) }))
+          id, scenes.map(s => ({ ...s, generatedImageUrl: cleanUrl(s.generatedImageUrl), generatedVideoUrl: cleanUrl(s.generatedVideoUrl), isGenerating: false }))
         ])
       ),
       audioChunks: Object.fromEntries(
@@ -403,13 +413,14 @@ const AppContent: React.FC = () => {
         onUpgradeToPro={handleUpgradeToPro}
         onCreateProject={handleCreateProject}
         onLoadProject={(p) => {
-          const resumeView = deriveResumeViewFromState(p.state);
+          const hydratedState = clearStaleGenerationFlags(p.state);
+          const resumeView = deriveResumeViewFromState(hydratedState);
           const loadedState: ProjectState = {
-            ...p.state,
-            projectId: p.state.projectId || p.id,
+            ...hydratedState,
+            projectId: hydratedState.projectId || p.id,
             activeView: resumeView,
-            lastEditorView: p.state.lastEditorView || (resumeView !== ActiveView.Hub ? resumeView : undefined),
-            isProUser: !!profile?.isPro || p.state.isProUser,
+            lastEditorView: hydratedState.lastEditorView || (resumeView !== ActiveView.Hub ? resumeView : undefined),
+            isProUser: !!profile?.isPro || hydratedState.isProUser,
           };
           setProjectState(loadedState);
           const loadedSettings =
