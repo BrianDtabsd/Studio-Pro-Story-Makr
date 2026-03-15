@@ -29,6 +29,22 @@ export const TextToSpeech: React.FC<Props> = ({
   defaultVoiceKey, onDefaultVoiceKeyChange, characterVoicePresets, analyzedScripts, onAnalyzedScriptsChange,
   audioChunks, onAudioChunksChange, onNavigateToNextStep
 }) => {
+  const asUiError = (error: unknown, prefix: string): string => {
+    if (error instanceof Error && error.message.trim().length > 0) {
+      return `${prefix} ${error.message}`;
+    }
+    if (typeof error === 'string' && error.trim().length > 0) {
+      return `${prefix} ${error}`;
+    }
+    try {
+      const asJson = JSON.stringify(error);
+      if (asJson && asJson !== '{}') return `${prefix} ${asJson}`;
+    } catch {
+      // ignore JSON serialization errors
+    }
+    return prefix;
+  };
+
   const [loading, setLoading] = useState(false);
   const [synthesizing, setSynthesizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,8 +70,8 @@ export const TextToSpeech: React.FC<Props> = ({
       const chars = activeStory.proSettingsUsed?.characters || [];
       const result = await analyzeScript(currentScript, chars);
       onAnalyzedScriptsChange({ ...analyzedScripts, [activeStory.id]: result });
-    } catch (e: any) {
-      setError("Script analysis failed. Check your script format.");
+    } catch (e: unknown) {
+      setError(asUiError(e, 'Script analysis failed.'));
     } finally {
       setLoading(false);
     }
@@ -86,8 +102,8 @@ export const TextToSpeech: React.FC<Props> = ({
     setError(null);
     try {
       await synthesizeEpisode(activeStory.id, currentScript, currentAnalyzedScript);
-    } catch (e: any) {
-      setError("Synthesis failed.");
+    } catch (e: unknown) {
+      setError(asUiError(e, 'Synthesis failed.'));
     } finally {
       setSynthesizing(false);
     }
@@ -113,8 +129,8 @@ export const TextToSpeech: React.FC<Props> = ({
         
         await synthesizeEpisode(ep.id, script, analyzed);
       }
-    } catch (e: any) {
-      setError("Batch synthesis failed.");
+    } catch (e: unknown) {
+      setError(asUiError(e, 'Batch synthesis failed.'));
     } finally {
       setSynthesizing(false);
     }

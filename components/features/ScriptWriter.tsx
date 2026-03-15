@@ -35,6 +35,22 @@ export const ScriptWriter: React.FC<ScriptWriterProps> = ({
   initialScriptType, onScriptTypeChange,
   onNavigateToNextStep, 
 }) => {
+  const asUiError = (error: unknown, prefix: string): string => {
+    if (error instanceof Error && error.message.trim().length > 0) {
+      return `${prefix} ${error.message}`;
+    }
+    if (typeof error === 'string' && error.trim().length > 0) {
+      return `${prefix} ${error}`;
+    }
+    try {
+      const asJson = JSON.stringify(error);
+      if (asJson && asJson !== '{}') return `${prefix} ${asJson}`;
+    } catch {
+      // ignore JSON serialization errors
+    }
+    return prefix;
+  };
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(selectedEpisodes[0]?.id || story?.id || null);
@@ -65,8 +81,8 @@ export const ScriptWriter: React.FC<ScriptWriterProps> = ({
     try {
       const script = await generateScript(currentOutline || activeStory.description, initialScriptType, activeStory);
       onScriptsChange({ ...scripts, [activeStory.id]: script }); 
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Script synthesis failed.');
+    } catch (err: unknown) {
+      setError(asUiError(err, 'Script synthesis failed.'));
     } finally {
       setLoading(false);
     }
@@ -84,8 +100,8 @@ export const ScriptWriter: React.FC<ScriptWriterProps> = ({
             newScripts[ep.id] = script;
         }
         onScriptsChange(newScripts);
-    } catch (err) {
-        setError("Batch synthesis failed.");
+    } catch (err: unknown) {
+        setError(asUiError(err, 'Batch synthesis failed.'));
     } finally {
         setLoading(false);
     }
