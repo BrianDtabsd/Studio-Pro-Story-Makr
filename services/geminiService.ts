@@ -1,88 +1,65 @@
-
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { getApp } from "firebase/app";
-import { GoogleGenAI, Modality } from "@google/genai";
-import {
-  GEMINI_TEXT_MODEL,
-  GEMINI_ANALYSIS_MODEL,
-  GEMINI_TTS_MODEL,
-  GEMINI_IMAGE_MODEL,
-  PRESET_VOICES_CONFIG,
-} from "../constants.ts";
 import {
   StoryIdea,
   ScriptType,
   VideoGenreId,
-  VIDEO_GENRES,
   ProStorySettings,
   AIAnalyzedScript,
-  CharacterVoicePreset,
   PresetVoiceKey,
-  PodcastFormat,
 } from "../types.ts";
 import { getChronosCallableNames, getChronosFunctionsMode, type ChronosCallableKey } from "../appConfig.ts";
 
 const getFns = () => getFunctions(getApp(), "us-central1");
-const getFunctionsMode = () => getChronosFunctionsMode();
-const shouldTryCallable = () => getFunctionsMode() !== "off";
-const shouldAllowDirectFallback = () => getFunctionsMode() === "fallback";
 const getCallableName = (key: ChronosCallableKey): string => getChronosCallableNames()[key];
 
-const firstNonEmptyString = (...values: unknown[]): string | null => {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim().length > 0) return value.trim();
-  }
-  return null;
-};
-
-const getAIInstance = (): GoogleGenAI => {
-  const runtimeEnv = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
-  const runtimeConfig =
-    typeof window !== "undefined"
-      ? ((window as unknown as { APP_CONFIG?: Record<string, unknown> }).APP_CONFIG || {})
-      : {};
-
-  const apiKey = firstNonEmptyString(
-    process.env.GEMINI_API_KEY,
-    process.env.API_KEY,
-    runtimeEnv?.GEMINI_API_KEY,
-    runtimeEnv?.API_KEY,
-    runtimeEnv?.VITE_GEMINI_API_KEY,
-    runtimeEnv?.VITE_API_KEY,
-    runtimeConfig.GEMINI_API_KEY,
-    runtimeConfig.API_KEY
-  );
-  if (!apiKey) {
+const ensureCloudFunctionsEnabled = () => {
+  const mode = getChronosFunctionsMode();
+  if (mode === "off") {
     throw new Error(
-      "Fallback AI key missing. Set GEMINI_API_KEY (or VITE_GEMINI_API_KEY) in .env.local, then restart the dev server."
+      "CHRONOS_FUNCTIONS_MODE is 'off'. This build is Cloud-Functions-only. Set CHRONOS_FUNCTIONS_MODE to 'strict' or 'fallback'."
     );
   }
-  return new GoogleGenAI({ apiKey });
 };
 
-const getCallableCode = (error: unknown): string => {
-  const raw = typeof (error as { code?: unknown })?.code === "string"
-    ? String((error as { code?: string }).code)
-    : "";
-  const normalized = raw.toLowerCase();
-  return normalized.startsWith("functions/")
-    ? normalized.replace("functions/", "")
-    : normalized;
+const asMessage = (error: unknown): string => {
+  if (error instanceof Error && typeof error.message === "string" && error.message.trim().length > 0) {
+    return error.message;
+  }
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return "Unknown error";
+  }
 };
 
-const shouldFallbackToDirect = (error: unknown): boolean => {
-  if (!shouldAllowDirectFallback()) return false;
-  const code = getCallableCode(error);
-  return (
-    code === "internal" ||
-    code === "unavailable" ||
-    code === "permission-denied" ||
-    code === "unauthenticated" ||
-    code === "deadline-exceeded" ||
-    code === "resource-exhausted" ||
-    code === "unknown" ||
-    code === "not-found"
-  );
+const fail = (prefix: string, error: unknown): never => {
+  throw new Error(`${prefix} ${asMessage(error)}`.trim());
+};
+
+const readBase64 = (data: any): string | null =>
+  (typeof data?.base64 === "string" && data.base64) ||
+  (typeof data?.imageBase64 === "string" && data.imageBase64) ||
+  (typeof data?.data?.base64 === "string" && data.data.base64) ||
+  null;
+
+const readUrl = (data: any): string | null =>
+  (typeof data?.url === "string" && data.url) ||
+  (typeof data?.videoUrl === "string" && data.videoUrl) ||
+  (typeof data?.resultUrl === "string" && data.resultUrl) ||
+  (typeof data?.data?.url === "string" && data.data.url) ||
+  null;
+
+const call = <Req, Res>(key: ChronosCallableKey, timeout?: number) =>
+  httpsCallable<Req, Res>(getFns(), getCallableName(key), timeout ? { timeout } : undefined);
+
+const ensureIdeas = (data: any): StoryIdea[] => {
+  const ideas = data?.ideas;
+  if (!Array.isArray(ideas)) {
+    throw new Error("Callable returned no ideas array.");
+  }
+  return ideas as StoryIdea[];
 };
 
 // ─── WAV encoding helpers (kept client-side — CF returns raw PCM) ────────────
@@ -138,76 +115,14 @@ export const generateStoryIdeas = async (
   proSettings?: ProStorySettings,
   variationCount: number = 5
 ): Promise<StoryIdea[]> => {
-  if (shouldTryCallable()) {
-    try {
-      const fn = httpsCallable<unknown, { ideas: StoryIdea[] }>(getFns(), getCallableName("generateStoryIdeas"));
-      const result = await fn({ keywords, genres, videoStructure, proSettings, variationCount });
-      return result.data.ideas;
-    } catch (error) {
-      if (!shouldFallbackToDirect(error)) throw error;
-    }
+  ensureCloudFunctionsEnabled();
+  try {
+    const fn = call<unknown, { ideas: StoryIdea[] }>("generateStoryIdeas");
+    const result = await fn({ keywords, genres, videoStructure, proSettings, variationCount });
+    return ensureIdeas(result.data);
+  } catch (error) {
+    fail("Story idea generation failed.", error);
   }
-
-  const ai = getAIInstance();
-  const topicLabels = genres.map(g => VIDEO_GENRES.find(v => v.id === g)?.label).join(", ");
-  const prompt = `You are a world-class narrative designer and content strategist known for sophisticated, high-tension storytelling.
-
-CORE OBJECTIVE: Generate ${variationCount} ${videoStructure === "episodic" ? "series concepts" : "standalone story ideas"} that are deeply engaging and avoid generic cliches.
-
-PARAMETERS:
-- Content Style: ${proSettings?.contentStyle || "General"}
-- Podcast/Upload Format: ${proSettings?.podcastFormat || "Standard"}
-- Topics: ${topicLabels}
-- Core Concept: ${keywords}
-- Character Count: ${proSettings?.characterCount || 1}
-- Target Audience: ${proSettings?.subGenre || "General"}
-
-WRITING STYLE:
-- Nuanced, cinematic, clear, and production-ready.
-- High dramatic tension and concrete scene hooks.
-- Strong visual framing and conflict.
-
-Return JSON only. ${videoStructure === "episodic"
-    ? '{ "seriesConcept": { "title": "string", "description": "string" }, "episodeIdeas": [ { "episodeTitle": "string", "episodeDescription": "string" } ] }'
-    : '[ { "title": "string", "description": "string" } ]'
-  }`;
-
-  const response = await ai.models.generateContent({
-    model: GEMINI_TEXT_MODEL,
-    contents: prompt,
-    config: { responseMimeType: "application/json", temperature: 0.8 }
-  });
-
-  const parsed = JSON.parse(response.text || "[]");
-  const targetAudience = proSettings?.subGenre || "General";
-  if (videoStructure === "episodic") {
-    const all: StoryIdea[] = [{
-      id: "series",
-      title: parsed.seriesConcept.title,
-      description: parsed.seriesConcept.description,
-      isSeriesConcept: true,
-      proSettingsUsed: proSettings,
-      targetAudience
-    }];
-    parsed.episodeIdeas.forEach((e: { episodeTitle: string; episodeDescription: string }, i: number) => {
-      all.push({
-        id: `ep-${i}`,
-        title: e.episodeTitle,
-        description: e.episodeDescription,
-        episodeNumber: i + 1,
-        parentSeriesTitle: parsed.seriesConcept.title,
-        proSettingsUsed: proSettings,
-        targetAudience
-      });
-    });
-    return all;
-  }
-  return parsed.map((p: { title: string; description: string }, i: number) => ({
-    ...p,
-    id: `idea-${i}`,
-    proSettingsUsed: proSettings,
-    targetAudience
-  }));
 };
 
 // ─── generateScript ──────────────────────────────────────────────────────────
@@ -217,65 +132,17 @@ export const generateScript = async (
   scriptType: ScriptType,
   story?: StoryIdea
 ): Promise<string> => {
-  if (shouldTryCallable()) {
-    try {
-      const fn = httpsCallable<unknown, { text: string }>(getFns(), getCallableName("generateScript"));
-      const result = await fn({ outline, scriptType, story });
-      return result.data.text;
-    } catch (error) {
-      if (!shouldFallbackToDirect(error)) throw error;
+  ensureCloudFunctionsEnabled();
+  try {
+    const fn = call<unknown, { text: string }>("generateScript");
+    const result = await fn({ outline, scriptType, story });
+    if (typeof result.data?.text !== "string") {
+      throw new Error("Callable returned no script text.");
     }
+    return result.data.text;
+  } catch (error) {
+    fail("Script generation failed.", error);
   }
-
-  const ai = getAIInstance();
-  const pro = story?.proSettingsUsed;
-
-  let scriptStyle = "";
-  if (pro?.characterCount === 1) {
-    scriptStyle = "One Narrator/Voice-over only with rich internal framing.";
-  } else if (pro?.characterCount === 2) {
-    if (pro.podcastFormat === PodcastFormat.Interview) {
-      scriptStyle = "High-stakes interview format with sharp questions and revealing answers.";
-    } else if (pro.podcastFormat === PodcastFormat.React || pro.podcastFormat === PodcastFormat.Review) {
-      scriptStyle = "Two characters with distinct viewpoints and intelligent reaction analysis.";
-    } else {
-      scriptStyle = "Intense dramatic conversation with subtext and emotional weight.";
-    }
-  } else {
-    scriptStyle =
-      scriptType === ScriptType.SingleVoice
-        ? "Sophisticated single voice narrative"
-        : scriptType === ScriptType.TwoVoice
-          ? "High-tension two-voice dialogue"
-          : "Complex multi-character ensemble";
-  }
-
-  const prompt = `You are an award-winning screenwriter.
-
-TASK: Write a comprehensive, production-ready script based on this outline:
-${outline}
-
-SPECIFICATIONS:
-- Content Style: ${pro?.contentStyle || "General"}
-- Podcast/Upload Format: ${pro?.podcastFormat || "Standard"}
-- Mode: ${scriptStyle}
-- Character Bible: ${pro?.characters?.map(c => `${c.name}: ${c.physicalDescription}, ${c.personality}`).join("; ") || "none"}
-- Setting: ${pro?.primarySetting || "Not specified"}
-- Target Audience: ${story?.targetAudience || "General"}
-
-WRITING DIRECTIVES:
-1) Extend narrative beats with clear escalation.
-2) Keep dialogue sharp, natural, and subtext-aware.
-3) Add concrete [VISUAL] descriptions with lighting/composition cues.
-4) Use [TIMESTAMP: MM:SS] markers frequently.
-5) Clearly mark speakers for TTS parsing.`;
-
-  const response = await ai.models.generateContent({
-    model: GEMINI_TEXT_MODEL,
-    contents: prompt,
-    config: { temperature: 0.85 }
-  });
-  return response.text || "";
 };
 
 // ─── analyzeScript ───────────────────────────────────────────────────────────
@@ -284,52 +151,14 @@ export const analyzeScript = async (
   fullScript: string,
   characterDefinitions: any[] = []
 ): Promise<AIAnalyzedScript> => {
-  if (shouldTryCallable()) {
-    try {
-      const fn = httpsCallable<unknown, AIAnalyzedScript>(getFns(), getCallableName("analyzeScript"), { timeout: 120000 });
-      const result = await fn({ fullScript, characterDefinitions });
-      return result.data;
-    } catch (error) {
-      if (!shouldFallbackToDirect(error)) throw error;
-    }
+  ensureCloudFunctionsEnabled();
+  try {
+    const fn = call<unknown, AIAnalyzedScript>("analyzeScript", 120000);
+    const result = await fn({ fullScript, characterDefinitions });
+    return result.data;
+  } catch (error) {
+    fail("Script analysis failed.", error);
   }
-
-  const ai = getAIInstance();
-  const characterBible = characterDefinitions.map(c =>
-    `- ${c.name}: ${c.physicalDescription || "n/a"} (${c.relationalStatus || "n/a"})`
-  ).join("\n");
-
-  const prompt = `ROLE: Director of Photography & Script Supervisor.
-
-VISUAL RULES (Character Bible):
-${characterBible || "None provided."}
-
-SCRIPT:
-${fullScript}
-
-TASK:
-Break this script into distinct scenes. For every scene, write a visualPrompt with consistent character appearance and setting continuity.
-
-RETURN JSON ONLY:
-{
-  "scenes": [
-    {
-      "sceneNumber": 1,
-      "description": "Brief summary",
-      "visualPrompt": "Detailed visual generation prompt",
-      "charactersInScene": ["Names"],
-      "dialogue": [ { "speaker": "Name", "text": "Line" } ]
-    }
-  ],
-  "allCharacters": ["List of all names found"]
-}`;
-
-  const response = await ai.models.generateContent({
-    model: GEMINI_ANALYSIS_MODEL,
-    contents: prompt,
-    config: { responseMimeType: "application/json", temperature: 0.2 }
-  });
-  return JSON.parse(response.text || "{}") as AIAnalyzedScript;
 };
 
 // ─── analyzeCharacterAvatar ──────────────────────────────────────────────────
@@ -338,27 +167,17 @@ export const analyzeCharacterAvatar = async (
   imageBase64: string,
   characterName: string
 ): Promise<string> => {
-  if (shouldTryCallable()) {
-    try {
-      const fn = httpsCallable<unknown, { text: string }>(getFns(), getCallableName("analyzeCharacterAvatar"));
-      const result = await fn({ imageBase64, characterName });
-      return result.data.text;
-    } catch (error) {
-      if (!shouldFallbackToDirect(error)) throw error;
+  ensureCloudFunctionsEnabled();
+  try {
+    const fn = call<unknown, { text: string }>("analyzeCharacterAvatar");
+    const result = await fn({ imageBase64, characterName });
+    if (typeof result.data?.text !== "string") {
+      throw new Error("Callable returned no avatar analysis text.");
     }
+    return result.data.text;
+  } catch (error) {
+    fail("Avatar analysis failed.", error);
   }
-
-  const ai = getAIInstance();
-  const response = await ai.models.generateContent({
-    model: GEMINI_ANALYSIS_MODEL,
-    contents: {
-      parts: [
-        { inlineData: { data: imageBase64.split(",")[1], mimeType: "image/jpeg" } },
-        { text: `Precisely describe character ${characterName} from this photo for continuity in generated scenes.` }
-      ]
-    }
-  });
-  return response.text || "";
 };
 
 // ─── generateSpeech ──────────────────────────────────────────────────────────
@@ -366,39 +185,20 @@ export const analyzeCharacterAvatar = async (
 
 export const generateSpeech = async (
   dialogueItems: Array<{ speaker: string; text: string }>,
-  _voicePresets: Record<string, CharacterVoicePreset>,
+  _voicePresets: Record<string, unknown>,
   defaultVoiceKey: PresetVoiceKey = "Narrator_M"
 ): Promise<string> => {
-  if (shouldTryCallable()) {
-    try {
-      const fn = httpsCallable<unknown, { base64Pcm: string; sampleRate: number }>(
-        getFns(),
-        getCallableName("generateSpeech"),
-        { timeout: 120000 }
-      );
-      const result = await fn({ dialogueItems, defaultVoiceKey });
-      return createWavBlobUrl(result.data.base64Pcm, result.data.sampleRate);
-    } catch (error) {
-      if (!shouldFallbackToDirect(error)) throw error;
+  ensureCloudFunctionsEnabled();
+  try {
+    const fn = call<unknown, { base64Pcm: string; sampleRate: number }>("generateSpeech", 120000);
+    const result = await fn({ dialogueItems, defaultVoiceKey });
+    if (typeof result.data?.base64Pcm !== "string" || result.data.base64Pcm.length === 0) {
+      throw new Error("Callable returned no PCM audio.");
     }
+    return createWavBlobUrl(result.data.base64Pcm, result.data.sampleRate || 24000);
+  } catch (error) {
+    fail("Speech generation failed.", error);
   }
-
-  const text = dialogueItems.map(d => `${d.speaker}: ${d.text}`).join("\n").trim();
-  if (!text) throw new Error("No dialogue text to synthesize.");
-
-  const ai = getAIInstance();
-  const voiceName = PRESET_VOICES_CONFIG[defaultVoiceKey]?.name || "Fenrir";
-  const response = await ai.models.generateContent({
-    model: GEMINI_TTS_MODEL,
-    contents: [{ parts: [{ text }] }],
-    config: {
-      responseModalities: [Modality.AUDIO],
-      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } }
-    }
-  });
-  const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-  if (!base64Audio) throw new Error("Audio synthesis returned no data.");
-  return createWavBlobUrl(base64Audio, 24000);
 };
 
 // ─── generateImageForPrompt ──────────────────────────────────────────────────
@@ -407,38 +207,36 @@ export const generateImageForPrompt = async (
   prompt: string,
   realistic: boolean = false
 ): Promise<string> => {
-  if (shouldTryCallable()) {
-    try {
-      const fn = httpsCallable<unknown, { base64: string }>(getFns(), getCallableName("generateImageForPrompt"), { timeout: 120000 });
-      const result = await fn({ prompt, realistic });
-      return `data:image/png;base64,${result.data.base64}`;
-    } catch (error) {
-      if (!shouldFallbackToDirect(error)) throw error;
+  ensureCloudFunctionsEnabled();
+  try {
+    const fn = call<unknown, { base64?: string; imageBase64?: string }>("generateImageForPrompt", 120000);
+    const result = await fn({ prompt, realistic });
+    const base64 = readBase64(result.data);
+    if (!base64) {
+      throw new Error("Callable returned no image base64.");
     }
+    return `data:image/png;base64,${base64}`;
+  } catch (error) {
+    fail("Image generation failed.", error);
   }
-
-  const ai = getAIInstance();
-  const finalPrompt = realistic
-    ? `${prompt}. Cinematic photography, highly realistic, 8k resolution, natural lighting, sharp focus.`
-    : prompt;
-  const response = await ai.models.generateContent({
-    model: GEMINI_IMAGE_MODEL,
-    contents: { parts: [{ text: finalPrompt }] },
-    config: { imageConfig: { aspectRatio: "16:9" } }
-  });
-  for (const part of response.candidates?.[0]?.content.parts || []) {
-    if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
-  }
-  throw new Error("Image generation returned no image data.");
 };
 
 // ─── generateVideoForPrompt ──────────────────────────────────────────────────
-// Phase 2 stub — CF throws unimplemented. Surfaces a clear user-facing error.
-
 export const generateVideoForPrompt = async (
-  _prompt: string,
-  _res: "720p" | "1080p" = "1080p",
-  _img?: string
+  prompt: string,
+  res: "720p" | "1080p" = "1080p",
+  img?: string
 ): Promise<string> => {
-  throw new Error("Video generation is coming in Phase 2. Use image generation for now.");
+  ensureCloudFunctionsEnabled();
+  try {
+    const fn = call<unknown, any>("generateVideoForPrompt", 300000);
+    const result = await fn({ prompt, resolution: res, imageUrl: img });
+    const url = readUrl(result.data);
+    if (!url) {
+      throw new Error("Callable returned no video URL.");
+    }
+    return url;
+  } catch (error) {
+    fail("Video generation failed.", error);
+  }
 };
