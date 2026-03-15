@@ -12,6 +12,7 @@ interface FirebaseContextType {
   signOut: () => Promise<void>;
   saveProject: (project: Project) => Promise<void>;
   deleteProject: (projectId: string) => Promise<void>;
+  updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
   upgradeToPro: () => Promise<void>;
 }
 
@@ -24,11 +25,41 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let unsubscribeProfile: (() => void) | null = null;
+    let unsubscribeProjects: (() => void) | null = null;
+    let authEventId = 0;
+    let warnedProjectsPermission = false;
+
+    const clearUserListeners = () => {
+      if (unsubscribeProfile) {
+        unsubscribeProfile();
+        unsubscribeProfile = null;
+      }
+      if (unsubscribeProjects) {
+        unsubscribeProjects();
+        unsubscribeProjects = null;
+      }
+    };
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      authEventId += 1;
+      const eventId = authEventId;
+      clearUserListeners();
       setUser(firebaseUser);
-      if (firebaseUser) {
-        // Fetch or create profile
-        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+
+      if (!firebaseUser) {
+        setProfile(null);
+        setProjects([]);
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const profileRef = doc(db, 'users', firebaseUser.uid);
+        const userDoc = await getDoc(profileRef);
+        if (eventId !== authEventId) return;
+
         if (userDoc.exists()) {
           const data = userDoc.data();
           setProfile({ ...data, isPro: data.plan === 'pro' } as UserProfile);
@@ -39,28 +70,55 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             joinedDate: Date.now(),
             isPro: false
           };
-          await setDoc(doc(db, 'users', firebaseUser.uid), newProfile);
+          await setDoc(profileRef, newProfile);
+          if (eventId !== authEventId) return;
           setProfile(newProfile);
         }
 
+        // Real-time listener on user doc — updates profile instantly when
+        // the Stripe webhook writes plan: 'pro' to Firestore.
+        unsubscribeProfile = onSnapshot(profileRef, (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            setProfile({ ...data, isPro: data.plan === 'pro' } as UserProfile);
+          } else {
+            setProfile(null);
+          }
+        });
+
         // Listen for projects
         const q = query(collection(db, 'users', firebaseUser.uid, 'projects'));
-        const unsubscribeProjects = onSnapshot(q, (snapshot) => {
+        unsubscribeProjects = onSnapshot(q, (snapshot) => {
           const projectList = snapshot.docs.map(doc => doc.data() as Project);
           setProjects(projectList.sort((a, b) => b.lastModified - a.lastModified));
         }, (error) => {
           console.error("Firestore Error (LIST projects):", error);
+          const code = typeof (error as { code?: unknown })?.code === 'string'
+            ? String((error as { code?: string }).code).toLowerCase()
+            : '';
+          if (code.includes('permission-denied') && !warnedProjectsPermission) {
+            warnedProjectsPermission = true;
+            console.error(
+              "Projects read denied by Firestore rules. Confirm this signed-in UID can read users/{uid}/projects in the deployed ruleset/database."
+            );
+          }
         });
-
-        return () => unsubscribeProjects();
-      } else {
-        setProfile(null);
-        setProjects([]);
+      } catch (error) {
+        console.error("Auth bootstrap error:", error);
+        if (eventId === authEventId) {
+          setProfile(null);
+          setProjects([]);
+        }
+      } finally {
+        if (eventId === authEventId) setLoading(false);
       }
-      setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      authEventId += 1;
+      clearUserListeners();
+      unsubscribe();
+    };
   }, []);
 
   const signIn = async () => {
@@ -81,11 +139,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const saveProject = async (project: Project) => {
-    if (!user) return;
+    if (!user) throw new Error('You must be signed in to save projects.');
     try {
       await setDoc(doc(db, 'users', user.uid, 'projects', project.id), project);
     } catch (error) {
       console.error("Firestore Error (SAVE project):", error);
+      throw error;
     }
   };
 
@@ -100,22 +159,24 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const upgradeToPro = async () => {
-    if (!user || !profile) return;
+  const updateProfile = async (updates: Partial<UserProfile>) => {
+    if (!user) return;
     try {
-      const updatedProfile = { ...profile, isPro: true };
-      await setDoc(doc(db, 'users', user.uid), updatedProfile);
-      setProfile(updatedProfile);
-      localStorage.setItem('story_makr_force_pro', 'true');
+      await setDoc(doc(db, 'users', user.uid), updates, { merge: true });
+      // onSnapshot listener on the user doc will pick up the change automatically.
     } catch (error) {
-      console.error("Firestore Error (UPGRADE profile):", error);
+      console.error("Firestore Error (UPDATE profile):", error);
     }
   };
+
+  // Upgrade is handled via Stripe checkout — see CheckoutModal in App.tsx.
+  // This stub keeps the context interface stable.
+  const upgradeToPro = async () => {};
 
   return (
     <FirebaseContext.Provider value={{ 
       user, profile, projects, loading, 
-      signIn, signOut: signOutUser, saveProject, deleteProject, upgradeToPro 
+      signIn, signOut: signOutUser, saveProject, deleteProject, updateProfile, upgradeToPro
     }}>
       {children}
     </FirebaseContext.Provider>

@@ -66,6 +66,18 @@ export async function uploadAudioAsset(
   return getDownloadURL(storageRef);
 }
 
+/**
+ * Upload a user avatar image to Storage.
+ * Overwrites on re-upload. Returns permanent download URL.
+ */
+export async function uploadAvatarAsset(userId: string, dataUrl: string): Promise<string> {
+  const jpeg = await compressToJpeg(dataUrl, 0.8);
+  const base64 = jpeg.split(',')[1];
+  const storageRef = ref(storage(), `story-makr/users/${userId}/avatar.jpg`);
+  await uploadString(storageRef, base64, 'base64', { contentType: 'image/jpeg' });
+  return getDownloadURL(storageRef);
+}
+
 // ── Cleanup helpers ───────────────────────────────────────────────────────────
 
 async function deleteFolder(folderRef: StorageReference): Promise<void> {

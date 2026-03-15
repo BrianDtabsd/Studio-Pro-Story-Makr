@@ -22,15 +22,28 @@ export const ProjectExport: React.FC<Props> = ({
 }) => {
   const [exporting, setExporting] = useState(false);
   const [playingIndex, setPlayingIndex] = useState<number | null>(null);
-  const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(story?.id || null);
+  const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(selectedEpisodes[0]?.id || story?.id || null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  const activeStory = selectedEpisodes.find(e => e.id === activeEpisodeId) || story;
+  const activeStory =
+    selectedEpisodes.find((e) => e.id === activeEpisodeId) ||
+    selectedEpisodes[0] ||
+    story;
   const currentScript = activeStory ? (editableScripts[activeStory.id] || scripts[activeStory.id] || '') : '';
   const currentScenes = activeStory ? (sceneImageDefinitions[activeStory.id] || []) : [];
   const currentAudio = activeStory ? (audioChunks[activeStory.id] || []) : [];
   const currentAnalyzed = activeStory ? analyzedScripts[activeStory.id] : null;
+
+  useEffect(() => {
+    setActiveEpisodeId((prev) => {
+      if (selectedEpisodes.length > 0) {
+        if (prev && selectedEpisodes.some((episode) => episode.id === prev)) return prev;
+        return selectedEpisodes[0].id;
+      }
+      return story?.id || null;
+    });
+  }, [selectedEpisodes, story?.id]);
 
   const packageEpisode = async (zip: JSZip, episode: StoryIdea) => {
     const epFolder = zip.folder(episode.title.replace(/\s+/g, '_'));

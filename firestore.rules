@@ -1,35 +1,6 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: users
-    // Document ID: {userId} (Firebase Auth UID)
-    // Fields:
-    //   - username: string (required)
-    //   - avatarSeed: string (required)
-    //   - joinedDate: number (required)
-    //   - isPro: boolean (optional)
-    //
-    // Collection: users/{userId}/projects
-    // Document ID: {projectId}
-    // Fields:
-    //   - id: string (required)
-    //   - title: string (required)
-    //   - description: string (optional)
-    //   - lastModified: number (required)
-    //   - progress: number (required)
-    //   - thumbnailUrl: string (optional)
-    //   - state: map (required)
-    //
-    // ===============================================================
-
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
-    
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -44,58 +15,112 @@ service cloud.firestore {
           (request.auth.token.email == "heybriano@gmail.com" && request.auth.token.email_verified == true));
     }
 
-    function hasRequiredFields(fields) {
-      return request.resource.data.keys().hasAll(fields);
+    function hasRequiredFields(data, fields) {
+      return data.keys().hasAll(fields);
     }
 
-    function hasOnlyAllowedFields(fields) {
-      return request.resource.data.keys().hasOnly(fields);
+    function hasOnlyAllowedFields(data, fields) {
+      return data.keys().hasOnly(fields);
     }
 
-    // ===============================================================
-    // Domain Validators
-    // ===============================================================
+    function isAllowedContentStyle(value) {
+      return ['Comedy', 'Drama', 'Documentary', 'Reality'].hasAny([value]);
+    }
 
-    function isValidUser(data) {
-      return hasRequiredFields(['username', 'avatarSeed', 'joinedDate']) &&
-             data.username is string && data.username.size() > 0 && data.username.size() < 100 &&
+    function hasImmutableJoinedDate(data, existing) {
+      return ('joinedDate' in data) &&
+             ('joinedDate' in existing) &&
+             data.joinedDate == existing.joinedDate;
+    }
+
+    function hasUnchangedRestrictedProfileFields(data, existing) {
+      return (
+        (
+          (!('role' in data) && !('role' in existing)) ||
+          (('role' in data) && ('role' in existing) && data.role == existing.role)
+        ) &&
+        (
+          (!('plan' in data) && !('plan' in existing)) ||
+          (('plan' in data) && ('plan' in existing) && data.plan == existing.plan)
+        ) &&
+        (
+          (!('isPro' in data) && !('isPro' in existing)) ||
+          (('isPro' in data) && ('isPro' in existing) && data.isPro == existing.isPro)
+        )
+      );
+    }
+
+    function isValidUserShape(data) {
+      return hasRequiredFields(data, ['username', 'avatarSeed', 'joinedDate']) &&
+             hasOnlyAllowedFields(data, [
+               'username',
+               'avatarSeed',
+               'joinedDate',
+               'avatarChoice',
+               'bio',
+               'defaultContentStyle',
+               'isPro',
+               'plan',
+               'role'
+             ]) &&
+             data.username is string &&
+             data.username.size() > 0 &&
+             data.username.size() <= 100 &&
              data.avatarSeed is string &&
+             data.avatarSeed.size() <= 200 &&
              data.joinedDate is number &&
+             (!('avatarChoice' in data) || (data.avatarChoice is string && data.avatarChoice.size() <= 1000)) &&
+             (!('bio' in data) || (data.bio is string && data.bio.size() <= 300)) &&
+             (!('defaultContentStyle' in data) || (data.defaultContentStyle is string && isAllowedContentStyle(data.defaultContentStyle))) &&
              (!('isPro' in data) || data.isPro is bool) &&
-             (!('role' in data) || data.role is string);
+             (!('plan' in data) || (data.plan is string && ['free', 'pro'].hasAny([data.plan]))) &&
+             (!('role' in data) || (data.role is string && ['admin', 'user'].hasAny([data.role])));
     }
 
-    function isValidProject(data) {
-      return hasRequiredFields(['id', 'title', 'lastModified', 'progress', 'state']) &&
+    function isValidUserCreate(data) {
+      return isValidUserShape(data) &&
+             (!('role' in data)) &&
+             (!('plan' in data)) &&
+             (!('isPro' in data) || data.isPro == false);
+    }
+
+    function isValidUserUpdate(data, existing) {
+      return isValidUserShape(data) &&
+             hasImmutableJoinedDate(data, existing) &&
+             hasUnchangedRestrictedProfileFields(data, existing);
+    }
+
+    function isValidProject(data, projectId) {
+      return hasRequiredFields(data, ['id', 'title', 'lastModified', 'progress', 'state']) &&
+             hasOnlyAllowedFields(data, ['id', 'title', 'description', 'lastModified', 'progress', 'thumbnailUrl', 'state']) &&
              data.id is string &&
-             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.id == projectId &&
+             data.title is string &&
+             data.title.size() > 0 &&
+             data.title.size() <= 200 &&
              data.lastModified is number &&
              data.progress is number &&
+             data.progress >= 0 &&
+             data.progress <= 100 &&
              data.state is map &&
-             (!('description' in data) || data.description is string) &&
-             (!('thumbnailUrl' in data) || data.thumbnailUrl is string);
+             (!('description' in data) || (data.description is string && data.description.size() <= 5000)) &&
+             (!('thumbnailUrl' in data) || (data.thumbnailUrl is string && data.thumbnailUrl.size() <= 2000));
     }
-
-    // ===============================================================
-    // Rules
-    // ===============================================================
 
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
       
-      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
-                    (!('role' in request.resource.data) || isAdmin());
+      allow create: if isOwner(userId) && isValidUserCreate(request.resource.data);
       
-      allow update: if (isOwner(userId) && isValidUser(request.resource.data) && 
-                       (request.resource.data.role == resource.data.role || isAdmin())) || 
-                    isAdmin();
+      allow update: if isAdmin() ||
+                    (isOwner(userId) && isValidUserUpdate(request.resource.data, resource.data));
       
       allow delete: if isAdmin();
 
       match /projects/{projectId} {
         allow read: if isOwner(userId) || isAdmin();
-        allow create: if isOwner(userId) && isValidProject(request.resource.data);
-        allow update: if isOwner(userId) && isValidProject(request.resource.data);
+        allow create: if isOwner(userId) && isValidProject(request.resource.data, projectId);
+        allow update: if isOwner(userId) && isValidProject(request.resource.data, projectId);
         allow delete: if isOwner(userId) || isAdmin();
       }
     }

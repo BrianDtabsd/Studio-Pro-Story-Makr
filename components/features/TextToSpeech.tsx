@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { SectionCard } from '../SectionCard.tsx';
 import { ActionButton } from '../common/ActionButton.tsx';
 import { ErrorDisplay } from '../ErrorDisplay.tsx';
-import { LoadingSpinner } from '../LoadingSpinner.tsx';
 import { analyzeScript, generateSpeech } from '../../services/geminiService.ts';
 import { AIAnalyzedScript, CharacterVoicePreset, SynthesizedChunk, PresetVoiceKey, ScriptType, StoryIdea } from '../../types.ts';
 import { PRESET_VOICES_CONFIG, PRESET_VOICE_KEYS_ORDERED } from '../../constants.ts';
@@ -18,6 +17,8 @@ interface Props {
   defaultVoiceKey: PresetVoiceKey;
   onDefaultVoiceKeyChange: (key: PresetVoiceKey) => void;
   characterVoicePresets: Record<string, CharacterVoicePreset>;
+  analyzedScripts: Record<string, AIAnalyzedScript | null>;
+  onAnalyzedScriptsChange: (scripts: Record<string, AIAnalyzedScript | null>) => void;
   audioChunks: Record<string, SynthesizedChunk[]>;
   onAudioChunksChange: (chunks: Record<string, SynthesizedChunk[]>) => void;
   onNavigateToNextStep: () => void;
@@ -25,19 +26,22 @@ interface Props {
 
 export const TextToSpeech: React.FC<Props> = ({
   story, selectedEpisodes, scripts, editableScripts, onEditableScriptsChange,
-  defaultVoiceKey, onDefaultVoiceKeyChange, characterVoicePresets,
+  defaultVoiceKey, onDefaultVoiceKeyChange, characterVoicePresets, analyzedScripts, onAnalyzedScriptsChange,
   audioChunks, onAudioChunksChange, onNavigateToNextStep
 }) => {
   const [loading, setLoading] = useState(false);
   const [synthesizing, setSynthesizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [playingIndex, setPlayingIndex] = useState<number | null>(null);
-  const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(story?.id || null);
-  const [analyzedScripts, setAnalyzedScripts] = useState<Record<string, AIAnalyzedScript>>({});
+  const [manualPlayingKey, setManualPlayingKey] = useState<string | null>(null);
+  const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(selectedEpisodes[0]?.id || story?.id || null);
   
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement | null }>({});
 
-  const activeStory = selectedEpisodes.find(e => e.id === activeEpisodeId) || story;
+  const activeStory =
+    selectedEpisodes.find((e) => e.id === activeEpisodeId) ||
+    selectedEpisodes[0] ||
+    story;
   const currentScript = activeStory ? (editableScripts[activeStory.id] || scripts[activeStory.id] || '') : '';
   const currentAnalyzedScript = activeStory ? analyzedScripts[activeStory.id] : null;
   const currentChunks = activeStory ? (audioChunks[activeStory.id] || []) : [];
@@ -49,7 +53,7 @@ export const TextToSpeech: React.FC<Props> = ({
     try {
       const chars = activeStory.proSettingsUsed?.characters || [];
       const result = await analyzeScript(currentScript, chars);
-      setAnalyzedScripts(prev => ({ ...prev, [activeStory.id]: result }));
+      onAnalyzedScriptsChange({ ...analyzedScripts, [activeStory.id]: result });
     } catch (e: any) {
       setError("Script analysis failed. Check your script format.");
     } finally {
@@ -94,15 +98,17 @@ export const TextToSpeech: React.FC<Props> = ({
     setSynthesizing(true);
     setError(null);
     try {
+      const nextAnalyzedScripts: Record<string, AIAnalyzedScript | null> = { ...analyzedScripts };
       for (const ep of selectedEpisodes) {
         const script = editableScripts[ep.id] || scripts[ep.id];
         if (!script) continue;
         
-        let analyzed = analyzedScripts[ep.id];
+        let analyzed = nextAnalyzedScripts[ep.id];
         if (!analyzed) {
           const chars = ep.proSettingsUsed?.characters || [];
           analyzed = await analyzeScript(script, chars);
-          setAnalyzedScripts(prev => ({ ...prev, [ep.id]: analyzed }));
+          nextAnalyzedScripts[ep.id] = analyzed;
+          onAnalyzedScriptsChange(nextAnalyzedScripts);
         }
         
         await synthesizeEpisode(ep.id, script, analyzed);
@@ -116,16 +122,67 @@ export const TextToSpeech: React.FC<Props> = ({
 
   const handlePlayAll = () => {
     if (currentChunks.length === 0) return;
+    setManualPlayingKey(null);
+    Object.values(audioRefs.current).forEach((audioEl: HTMLAudioElement | null) => {
+      if (audioEl) {
+        audioEl.pause();
+        audioEl.currentTime = 0;
+      }
+    });
     setPlayingIndex(0);
   };
+
+  const handleToggleSceneAudio = (sceneNumber: number) => {
+    const key = `${activeEpisodeId}-${sceneNumber}`;
+    const audioEl = audioRefs.current[key];
+    if (!audioEl) return;
+
+    // Manual playback cancels batch playback state.
+    setPlayingIndex(null);
+
+    if (manualPlayingKey === key && !audioEl.paused) {
+      audioEl.pause();
+      setManualPlayingKey(null);
+      return;
+    }
+
+    Object.entries(audioRefs.current).forEach(([otherKey, otherAudio]) => {
+      const audioEl = otherAudio as HTMLAudioElement | null;
+      if (audioEl && otherKey !== key) {
+        audioEl.pause();
+        audioEl.currentTime = 0;
+      }
+    });
+
+    if (manualPlayingKey !== key) {
+      audioEl.currentTime = 0;
+    }
+    audioEl.play().then(() => {
+      setManualPlayingKey(key);
+    }).catch((playError) => {
+      console.error("Audio play failed:", playError);
+      setManualPlayingKey(null);
+    });
+  };
+
+  useEffect(() => {
+    setActiveEpisodeId((prev) => {
+      if (selectedEpisodes.length > 0) {
+        if (prev && selectedEpisodes.some((episode) => episode.id === prev)) return prev;
+        return selectedEpisodes[0].id;
+      }
+      return story?.id || null;
+    });
+  }, [selectedEpisodes, story?.id]);
 
   useEffect(() => {
     if (playingIndex !== null && playingIndex < currentChunks.length) {
       const sceneNum = currentChunks[playingIndex].sceneNumbers[0];
       const audioEl = audioRefs.current[`${activeEpisodeId}-${sceneNum}`];
       if (audioEl) {
-        audioEl.play().catch(e => {
-          console.error("Audio play failed:", e);
+        audioEl.currentTime = 0;
+        audioEl.play().catch(playError => {
+          console.error("Audio play failed:", playError);
           setPlayingIndex(playingIndex + 1);
         });
         audioEl.onended = () => {
@@ -138,6 +195,17 @@ export const TextToSpeech: React.FC<Props> = ({
       setPlayingIndex(null);
     }
   }, [playingIndex, currentChunks, activeEpisodeId]);
+
+  useEffect(() => {
+    setManualPlayingKey(null);
+    setPlayingIndex(null);
+    Object.values(audioRefs.current).forEach((audioEl: HTMLAudioElement | null) => {
+      if (audioEl) {
+        audioEl.pause();
+        audioEl.currentTime = 0;
+      }
+    });
+  }, [activeEpisodeId]);
 
   if (!story) return <SectionCard title="Voice Production"><p className="text-neu-text italic">Matrix empty. Select a narrative node first.</p></SectionCard>;
 
@@ -213,8 +281,10 @@ export const TextToSpeech: React.FC<Props> = ({
                   {currentAnalyzedScript.scenes.map(s => {
                     const chunk = currentChunks.find(c => c.sceneNumbers.includes(s.sceneNumber));
                     const isPlaying = playingIndex !== null && playingIndex < currentChunks.length && currentChunks[playingIndex].sceneNumbers.includes(s.sceneNumber);
+                    const audioKey = `${activeEpisodeId}-${s.sceneNumber}`;
+                    const isManualPlaying = manualPlayingKey === audioKey;
                     return (
-                      <div key={s.sceneNumber} className={`neu-flat p-4 rounded-xl flex items-center justify-between transition-all hover:scale-[1.01] ${isPlaying ? 'border-2 border-accent-orange' : ''}`}>
+                      <div key={s.sceneNumber} className={`neu-flat p-4 rounded-xl flex items-center justify-between transition-all hover:scale-[1.01] ${isPlaying || isManualPlaying ? 'border-2 border-accent-orange' : ''}`}>
                         <div className="flex items-center gap-4">
                           <div className="w-10 h-10 flex items-center justify-center neu-pressed rounded-lg text-xs font-black text-neu-text-dark">S{s.sceneNumber}</div>
                           <div>
@@ -225,17 +295,27 @@ export const TextToSpeech: React.FC<Props> = ({
                         {chunk ? (
                             <div className="flex gap-2">
                                  <audio 
-                                   ref={el => audioRefs.current[`${activeEpisodeId}-${s.sceneNumber}`] = el}
+                                   ref={el => {
+                                     audioRefs.current[audioKey] = el;
+                                     if (el) {
+                                       el.onended = () => {
+                                         if (manualPlayingKey === audioKey) {
+                                           setManualPlayingKey(null);
+                                         }
+                                       };
+                                     }
+                                   }}
                                    src={chunk.audioDataUrl} 
                                    className="hidden" 
                                  />
-                                 <button onClick={() => {
-                                   const audioEl = audioRefs.current[`${activeEpisodeId}-${s.sceneNumber}`];
-                                   if (audioEl) {
-                                     audioEl.currentTime = 0;
-                                     audioEl.play();
-                                   }
-                                 }} className="neu-btn p-2 text-accent-orange font-bold">▶</button>
+                                 <button
+                                   onClick={() => handleToggleSceneAudio(s.sceneNumber)}
+                                   className="neu-btn p-2 text-accent-orange font-bold min-w-[36px]"
+                                   title={isManualPlaying ? "Pause clip" : "Play clip"}
+                                   aria-label={isManualPlaying ? "Pause clip" : "Play clip"}
+                                 >
+                                   {isManualPlaying ? '⏸' : '▶'}
+                                 </button>
                                  <DownloadButton fileUrl={chunk.audioDataUrl} fileName={chunk.downloadFilename} buttonText="WAV" className="neu-btn text-xs py-1 px-4" />
                             </div>
                         ) : (
