@@ -22,10 +22,35 @@ import {
 } from "../types.ts";
 
 const getFns = () => getFunctions(getApp(), "us-central1");
+
+const firstNonEmptyString = (...values: unknown[]): string | null => {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) return value.trim();
+  }
+  return null;
+};
+
 const getAIInstance = (): GoogleGenAI => {
-  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
+  const runtimeEnv = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
+  const runtimeConfig =
+    typeof window !== "undefined"
+      ? ((window as unknown as { APP_CONFIG?: Record<string, unknown> }).APP_CONFIG || {})
+      : {};
+
+  const apiKey = firstNonEmptyString(
+    process.env.GEMINI_API_KEY,
+    process.env.API_KEY,
+    runtimeEnv?.GEMINI_API_KEY,
+    runtimeEnv?.API_KEY,
+    runtimeEnv?.VITE_GEMINI_API_KEY,
+    runtimeEnv?.VITE_API_KEY,
+    runtimeConfig.GEMINI_API_KEY,
+    runtimeConfig.API_KEY
+  );
   if (!apiKey) {
-    throw new Error("Fallback AI key missing. Set GEMINI_API_KEY in .env.local.");
+    throw new Error(
+      "Fallback AI key missing. Set GEMINI_API_KEY (or VITE_GEMINI_API_KEY) in .env.local, then restart the dev server."
+    );
   }
   return new GoogleGenAI({ apiKey });
 };
