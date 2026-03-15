@@ -20,8 +20,13 @@ import {
   PresetVoiceKey,
   PodcastFormat,
 } from "../types.ts";
+import { getChronosCallableNames, getChronosFunctionsMode, type ChronosCallableKey } from "../appConfig.ts";
 
 const getFns = () => getFunctions(getApp(), "us-central1");
+const getFunctionsMode = () => getChronosFunctionsMode();
+const shouldTryCallable = () => getFunctionsMode() !== "off";
+const shouldAllowDirectFallback = () => getFunctionsMode() === "fallback";
+const getCallableName = (key: ChronosCallableKey): string => getChronosCallableNames()[key];
 
 const firstNonEmptyString = (...values: unknown[]): string | null => {
   for (const value of values) {
@@ -66,6 +71,7 @@ const getCallableCode = (error: unknown): string => {
 };
 
 const shouldFallbackToDirect = (error: unknown): boolean => {
+  if (!shouldAllowDirectFallback()) return false;
   const code = getCallableCode(error);
   return (
     code === "internal" ||
@@ -132,12 +138,14 @@ export const generateStoryIdeas = async (
   proSettings?: ProStorySettings,
   variationCount: number = 5
 ): Promise<StoryIdea[]> => {
-  try {
-    const fn = httpsCallable<unknown, { ideas: StoryIdea[] }>(getFns(), "generateStoryIdeas");
-    const result = await fn({ keywords, genres, videoStructure, proSettings, variationCount });
-    return result.data.ideas;
-  } catch (error) {
-    if (!shouldFallbackToDirect(error)) throw error;
+  if (shouldTryCallable()) {
+    try {
+      const fn = httpsCallable<unknown, { ideas: StoryIdea[] }>(getFns(), getCallableName("generateStoryIdeas"));
+      const result = await fn({ keywords, genres, videoStructure, proSettings, variationCount });
+      return result.data.ideas;
+    } catch (error) {
+      if (!shouldFallbackToDirect(error)) throw error;
+    }
   }
 
   const ai = getAIInstance();
@@ -209,12 +217,14 @@ export const generateScript = async (
   scriptType: ScriptType,
   story?: StoryIdea
 ): Promise<string> => {
-  try {
-    const fn = httpsCallable<unknown, { text: string }>(getFns(), "generateScript");
-    const result = await fn({ outline, scriptType, story });
-    return result.data.text;
-  } catch (error) {
-    if (!shouldFallbackToDirect(error)) throw error;
+  if (shouldTryCallable()) {
+    try {
+      const fn = httpsCallable<unknown, { text: string }>(getFns(), getCallableName("generateScript"));
+      const result = await fn({ outline, scriptType, story });
+      return result.data.text;
+    } catch (error) {
+      if (!shouldFallbackToDirect(error)) throw error;
+    }
   }
 
   const ai = getAIInstance();
@@ -274,12 +284,14 @@ export const analyzeScript = async (
   fullScript: string,
   characterDefinitions: any[] = []
 ): Promise<AIAnalyzedScript> => {
-  try {
-    const fn = httpsCallable<unknown, AIAnalyzedScript>(getFns(), "analyzeScript", { timeout: 120000 });
-    const result = await fn({ fullScript, characterDefinitions });
-    return result.data;
-  } catch (error) {
-    if (!shouldFallbackToDirect(error)) throw error;
+  if (shouldTryCallable()) {
+    try {
+      const fn = httpsCallable<unknown, AIAnalyzedScript>(getFns(), getCallableName("analyzeScript"), { timeout: 120000 });
+      const result = await fn({ fullScript, characterDefinitions });
+      return result.data;
+    } catch (error) {
+      if (!shouldFallbackToDirect(error)) throw error;
+    }
   }
 
   const ai = getAIInstance();
@@ -326,12 +338,14 @@ export const analyzeCharacterAvatar = async (
   imageBase64: string,
   characterName: string
 ): Promise<string> => {
-  try {
-    const fn = httpsCallable<unknown, { text: string }>(getFns(), "analyzeCharacterAvatar");
-    const result = await fn({ imageBase64, characterName });
-    return result.data.text;
-  } catch (error) {
-    if (!shouldFallbackToDirect(error)) throw error;
+  if (shouldTryCallable()) {
+    try {
+      const fn = httpsCallable<unknown, { text: string }>(getFns(), getCallableName("analyzeCharacterAvatar"));
+      const result = await fn({ imageBase64, characterName });
+      return result.data.text;
+    } catch (error) {
+      if (!shouldFallbackToDirect(error)) throw error;
+    }
   }
 
   const ai = getAIInstance();
@@ -355,16 +369,18 @@ export const generateSpeech = async (
   _voicePresets: Record<string, CharacterVoicePreset>,
   defaultVoiceKey: PresetVoiceKey = "Narrator_M"
 ): Promise<string> => {
-  try {
-    const fn = httpsCallable<unknown, { base64Pcm: string; sampleRate: number }>(
-      getFns(),
-      "generateSpeech",
-      { timeout: 120000 }
-    );
-    const result = await fn({ dialogueItems, defaultVoiceKey });
-    return createWavBlobUrl(result.data.base64Pcm, result.data.sampleRate);
-  } catch (error) {
-    if (!shouldFallbackToDirect(error)) throw error;
+  if (shouldTryCallable()) {
+    try {
+      const fn = httpsCallable<unknown, { base64Pcm: string; sampleRate: number }>(
+        getFns(),
+        getCallableName("generateSpeech"),
+        { timeout: 120000 }
+      );
+      const result = await fn({ dialogueItems, defaultVoiceKey });
+      return createWavBlobUrl(result.data.base64Pcm, result.data.sampleRate);
+    } catch (error) {
+      if (!shouldFallbackToDirect(error)) throw error;
+    }
   }
 
   const text = dialogueItems.map(d => `${d.speaker}: ${d.text}`).join("\n").trim();
@@ -391,12 +407,14 @@ export const generateImageForPrompt = async (
   prompt: string,
   realistic: boolean = false
 ): Promise<string> => {
-  try {
-    const fn = httpsCallable<unknown, { base64: string }>(getFns(), "generateImage", { timeout: 120000 });
-    const result = await fn({ prompt, realistic });
-    return `data:image/png;base64,${result.data.base64}`;
-  } catch (error) {
-    if (!shouldFallbackToDirect(error)) throw error;
+  if (shouldTryCallable()) {
+    try {
+      const fn = httpsCallable<unknown, { base64: string }>(getFns(), getCallableName("generateImageForPrompt"), { timeout: 120000 });
+      const result = await fn({ prompt, realistic });
+      return `data:image/png;base64,${result.data.base64}`;
+    } catch (error) {
+      if (!shouldFallbackToDirect(error)) throw error;
+    }
   }
 
   const ai = getAIInstance();
