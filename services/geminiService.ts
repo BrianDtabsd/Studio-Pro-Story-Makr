@@ -20,7 +20,6 @@ import {
   PresetVoiceKey,
   PodcastFormat,
 } from "../types.ts";
-import { getChronosCallableNames, getChronosFunctionsMode, type ChronosCallableKey } from "../appConfig.ts";
 
 const getFns = () => getFunctions(getApp(), "us-central1");
 
@@ -29,36 +28,6 @@ const firstNonEmptyString = (...values: unknown[]): string | null => {
     if (typeof value === "string" && value.trim().length > 0) return value.trim();
   }
   return null;
-};
-
-const getFunctionsMode = () => getChronosFunctionsMode();
-const shouldTryCallable = () => getFunctionsMode() !== "off";
-const shouldAllowDirectFallback = () => getFunctionsMode() === "fallback";
-const getCallableName = (key: ChronosCallableKey): string => getChronosCallableNames()[key];
-
-const extractErrorMessage = (error: unknown): string => {
-  if (error instanceof Error && typeof error.message === "string" && error.message.trim().length > 0) {
-    return error.message;
-  }
-  return typeof error === "string" ? error : JSON.stringify(error);
-};
-
-const normalizeDirectFallbackError = (error: unknown): Error => {
-  const message = extractErrorMessage(error);
-  if (/api key not valid|api_key_invalid/i.test(message)) {
-    return new Error(
-      "Direct Gemini fallback failed because the API key is invalid. Set a valid GEMINI_API_KEY in .env.local and restart `npm run dev`."
-    );
-  }
-  return error instanceof Error ? error : new Error(message);
-};
-
-const runDirectFallback = async <T>(runner: () => Promise<T>): Promise<T> => {
-  try {
-    return await runner();
-  } catch (error) {
-    throw normalizeDirectFallbackError(error);
-  }
 };
 
 const getAIInstance = (): GoogleGenAI => {
@@ -70,13 +39,17 @@ const getAIInstance = (): GoogleGenAI => {
 
   const apiKey = firstNonEmptyString(
     process.env.GEMINI_API_KEY,
+    process.env.API_KEY,
     runtimeEnv?.GEMINI_API_KEY,
+    runtimeEnv?.API_KEY,
     runtimeEnv?.VITE_GEMINI_API_KEY,
+    runtimeEnv?.VITE_API_KEY,
     runtimeConfig.GEMINI_API_KEY,
+    runtimeConfig.API_KEY
   );
   if (!apiKey) {
     throw new Error(
-      "Direct Gemini fallback key is missing. Set GEMINI_API_KEY in .env.local (or switch CHRONOS_FUNCTIONS_MODE to strict), then restart the dev server."
+      "Fallback AI key missing. Set GEMINI_API_KEY (or VITE_GEMINI_API_KEY) in .env.local, then restart the dev server."
     );
   }
   return new GoogleGenAI({ apiKey });
@@ -93,7 +66,6 @@ const getCallableCode = (error: unknown): string => {
 };
 
 const shouldFallbackToDirect = (error: unknown): boolean => {
-  if (!shouldAllowDirectFallback()) return false;
   const code = getCallableCode(error);
   return (
     code === "internal" ||
@@ -160,20 +132,17 @@ export const generateStoryIdeas = async (
   proSettings?: ProStorySettings,
   variationCount: number = 5
 ): Promise<StoryIdea[]> => {
-  if (shouldTryCallable()) {
-    try {
-      const fn = httpsCallable<unknown, { ideas: StoryIdea[] }>(getFns(), getCallableName("generateStoryIdeas"));
-      const result = await fn({ keywords, genres, videoStructure, proSettings, variationCount });
-      return result.data.ideas;
-    } catch (error) {
-      if (!shouldFallbackToDirect(error)) throw error;
-    }
+  try {
+    const fn = httpsCallable<unknown, { ideas: StoryIdea[] }>(getFns(), "generateStoryIdeas");
+    const result = await fn({ keywords, genres, videoStructure, proSettings, variationCount });
+    return result.data.ideas;
+  } catch (error) {
+    if (!shouldFallbackToDirect(error)) throw error;
   }
 
-  return runDirectFallback(async () => {
-    const ai = getAIInstance();
-    const topicLabels = genres.map(g => VIDEO_GENRES.find(v => v.id === g)?.label).join(", ");
-    const prompt = `You are a world-class narrative designer and content strategist known for sophisticated, high-tension storytelling.
+  const ai = getAIInstance();
+  const topicLabels = genres.map(g => VIDEO_GENRES.find(v => v.id === g)?.label).join(", ");
+  const prompt = `You are a world-class narrative designer and content strategist known for sophisticated, high-tension storytelling.
 
 CORE OBJECTIVE: Generate ${variationCount} ${videoStructure === "episodic" ? "series concepts" : "standalone story ideas"} that are deeply engaging and avoid generic cliches.
 
@@ -195,43 +164,42 @@ Return JSON only. ${videoStructure === "episodic"
     : '[ { "title": "string", "description": "string" } ]'
   }`;
 
-    const response = await ai.models.generateContent({
-      model: GEMINI_TEXT_MODEL,
-      contents: prompt,
-      config: { responseMimeType: "application/json", temperature: 0.8 }
-    });
+  const response = await ai.models.generateContent({
+    model: GEMINI_TEXT_MODEL,
+    contents: prompt,
+    config: { responseMimeType: "application/json", temperature: 0.8 }
+  });
 
-    const parsed = JSON.parse(response.text || "[]");
-    const targetAudience = proSettings?.subGenre || "General";
-    if (videoStructure === "episodic") {
-      const all: StoryIdea[] = [{
-        id: "series",
-        title: parsed.seriesConcept.title,
-        description: parsed.seriesConcept.description,
-        isSeriesConcept: true,
-        proSettingsUsed: proSettings,
-        targetAudience
-      }];
-      parsed.episodeIdeas.forEach((e: { episodeTitle: string; episodeDescription: string }, i: number) => {
-        all.push({
-          id: `ep-${i}`,
-          title: e.episodeTitle,
-          description: e.episodeDescription,
-          episodeNumber: i + 1,
-          parentSeriesTitle: parsed.seriesConcept.title,
-          proSettingsUsed: proSettings,
-          targetAudience
-        });
-      });
-      return all;
-    }
-    return parsed.map((p: { title: string; description: string }, i: number) => ({
-      ...p,
-      id: `idea-${i}`,
+  const parsed = JSON.parse(response.text || "[]");
+  const targetAudience = proSettings?.subGenre || "General";
+  if (videoStructure === "episodic") {
+    const all: StoryIdea[] = [{
+      id: "series",
+      title: parsed.seriesConcept.title,
+      description: parsed.seriesConcept.description,
+      isSeriesConcept: true,
       proSettingsUsed: proSettings,
       targetAudience
-    }));
-  });
+    }];
+    parsed.episodeIdeas.forEach((e: { episodeTitle: string; episodeDescription: string }, i: number) => {
+      all.push({
+        id: `ep-${i}`,
+        title: e.episodeTitle,
+        description: e.episodeDescription,
+        episodeNumber: i + 1,
+        parentSeriesTitle: parsed.seriesConcept.title,
+        proSettingsUsed: proSettings,
+        targetAudience
+      });
+    });
+    return all;
+  }
+  return parsed.map((p: { title: string; description: string }, i: number) => ({
+    ...p,
+    id: `idea-${i}`,
+    proSettingsUsed: proSettings,
+    targetAudience
+  }));
 };
 
 // ─── generateScript ──────────────────────────────────────────────────────────
@@ -241,19 +209,16 @@ export const generateScript = async (
   scriptType: ScriptType,
   story?: StoryIdea
 ): Promise<string> => {
-  if (shouldTryCallable()) {
-    try {
-      const fn = httpsCallable<unknown, { text: string }>(getFns(), getCallableName("generateScript"));
-      const result = await fn({ outline, scriptType, story });
-      return result.data.text;
-    } catch (error) {
-      if (!shouldFallbackToDirect(error)) throw error;
-    }
+  try {
+    const fn = httpsCallable<unknown, { text: string }>(getFns(), "generateScript");
+    const result = await fn({ outline, scriptType, story });
+    return result.data.text;
+  } catch (error) {
+    if (!shouldFallbackToDirect(error)) throw error;
   }
 
-  return runDirectFallback(async () => {
-    const ai = getAIInstance();
-    const pro = story?.proSettingsUsed;
+  const ai = getAIInstance();
+  const pro = story?.proSettingsUsed;
 
   let scriptStyle = "";
   if (pro?.characterCount === 1) {
@@ -295,13 +260,12 @@ WRITING DIRECTIVES:
 4) Use [TIMESTAMP: MM:SS] markers frequently.
 5) Clearly mark speakers for TTS parsing.`;
 
-    const response = await ai.models.generateContent({
-      model: GEMINI_TEXT_MODEL,
-      contents: prompt,
-      config: { temperature: 0.85 }
-    });
-    return response.text || "";
+  const response = await ai.models.generateContent({
+    model: GEMINI_TEXT_MODEL,
+    contents: prompt,
+    config: { temperature: 0.85 }
   });
+  return response.text || "";
 };
 
 // ─── analyzeScript ───────────────────────────────────────────────────────────
@@ -310,21 +274,18 @@ export const analyzeScript = async (
   fullScript: string,
   characterDefinitions: any[] = []
 ): Promise<AIAnalyzedScript> => {
-  if (shouldTryCallable()) {
-    try {
-      const fn = httpsCallable<unknown, AIAnalyzedScript>(getFns(), getCallableName("analyzeScript"), { timeout: 120000 });
-      const result = await fn({ fullScript, characterDefinitions });
-      return result.data;
-    } catch (error) {
-      if (!shouldFallbackToDirect(error)) throw error;
-    }
+  try {
+    const fn = httpsCallable<unknown, AIAnalyzedScript>(getFns(), "analyzeScript", { timeout: 120000 });
+    const result = await fn({ fullScript, characterDefinitions });
+    return result.data;
+  } catch (error) {
+    if (!shouldFallbackToDirect(error)) throw error;
   }
 
-  return runDirectFallback(async () => {
-    const ai = getAIInstance();
-    const characterBible = characterDefinitions.map(c =>
-      `- ${c.name}: ${c.physicalDescription || "n/a"} (${c.relationalStatus || "n/a"})`
-    ).join("\n");
+  const ai = getAIInstance();
+  const characterBible = characterDefinitions.map(c =>
+    `- ${c.name}: ${c.physicalDescription || "n/a"} (${c.relationalStatus || "n/a"})`
+  ).join("\n");
 
   const prompt = `ROLE: Director of Photography & Script Supervisor.
 
@@ -351,13 +312,12 @@ RETURN JSON ONLY:
   "allCharacters": ["List of all names found"]
 }`;
 
-    const response = await ai.models.generateContent({
-      model: GEMINI_ANALYSIS_MODEL,
-      contents: prompt,
-      config: { responseMimeType: "application/json", temperature: 0.2 }
-    });
-    return JSON.parse(response.text || "{}") as AIAnalyzedScript;
+  const response = await ai.models.generateContent({
+    model: GEMINI_ANALYSIS_MODEL,
+    contents: prompt,
+    config: { responseMimeType: "application/json", temperature: 0.2 }
   });
+  return JSON.parse(response.text || "{}") as AIAnalyzedScript;
 };
 
 // ─── analyzeCharacterAvatar ──────────────────────────────────────────────────
@@ -366,29 +326,25 @@ export const analyzeCharacterAvatar = async (
   imageBase64: string,
   characterName: string
 ): Promise<string> => {
-  if (shouldTryCallable()) {
-    try {
-      const fn = httpsCallable<unknown, { text: string }>(getFns(), getCallableName("analyzeCharacterAvatar"));
-      const result = await fn({ imageBase64, characterName });
-      return result.data.text;
-    } catch (error) {
-      if (!shouldFallbackToDirect(error)) throw error;
-    }
+  try {
+    const fn = httpsCallable<unknown, { text: string }>(getFns(), "analyzeCharacterAvatar");
+    const result = await fn({ imageBase64, characterName });
+    return result.data.text;
+  } catch (error) {
+    if (!shouldFallbackToDirect(error)) throw error;
   }
 
-  return runDirectFallback(async () => {
-    const ai = getAIInstance();
-    const response = await ai.models.generateContent({
-      model: GEMINI_ANALYSIS_MODEL,
-      contents: {
-        parts: [
-          { inlineData: { data: imageBase64.split(",")[1], mimeType: "image/jpeg" } },
-          { text: `Precisely describe character ${characterName} from this photo for continuity in generated scenes.` }
-        ]
-      }
-    });
-    return response.text || "";
+  const ai = getAIInstance();
+  const response = await ai.models.generateContent({
+    model: GEMINI_ANALYSIS_MODEL,
+    contents: {
+      parts: [
+        { inlineData: { data: imageBase64.split(",")[1], mimeType: "image/jpeg" } },
+        { text: `Precisely describe character ${characterName} from this photo for continuity in generated scenes.` }
+      ]
+    }
   });
+  return response.text || "";
 };
 
 // ─── generateSpeech ──────────────────────────────────────────────────────────
@@ -399,38 +355,34 @@ export const generateSpeech = async (
   _voicePresets: Record<string, CharacterVoicePreset>,
   defaultVoiceKey: PresetVoiceKey = "Narrator_M"
 ): Promise<string> => {
-  if (shouldTryCallable()) {
-    try {
-      const fn = httpsCallable<unknown, { base64Pcm: string; sampleRate: number }>(
-        getFns(),
-        getCallableName("generateSpeech"),
-        { timeout: 120000 }
-      );
-      const result = await fn({ dialogueItems, defaultVoiceKey });
-      return createWavBlobUrl(result.data.base64Pcm, result.data.sampleRate);
-    } catch (error) {
-      if (!shouldFallbackToDirect(error)) throw error;
-    }
+  try {
+    const fn = httpsCallable<unknown, { base64Pcm: string; sampleRate: number }>(
+      getFns(),
+      "generateSpeech",
+      { timeout: 120000 }
+    );
+    const result = await fn({ dialogueItems, defaultVoiceKey });
+    return createWavBlobUrl(result.data.base64Pcm, result.data.sampleRate);
+  } catch (error) {
+    if (!shouldFallbackToDirect(error)) throw error;
   }
 
-  return runDirectFallback(async () => {
-    const text = dialogueItems.map(d => `${d.speaker}: ${d.text}`).join("\n").trim();
-    if (!text) throw new Error("No dialogue text to synthesize.");
+  const text = dialogueItems.map(d => `${d.speaker}: ${d.text}`).join("\n").trim();
+  if (!text) throw new Error("No dialogue text to synthesize.");
 
-    const ai = getAIInstance();
-    const voiceName = PRESET_VOICES_CONFIG[defaultVoiceKey]?.name || "Fenrir";
-    const response = await ai.models.generateContent({
-      model: GEMINI_TTS_MODEL,
-      contents: [{ parts: [{ text }] }],
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } }
-      }
-    });
-    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!base64Audio) throw new Error("Audio synthesis returned no data.");
-    return createWavBlobUrl(base64Audio, 24000);
+  const ai = getAIInstance();
+  const voiceName = PRESET_VOICES_CONFIG[defaultVoiceKey]?.name || "Fenrir";
+  const response = await ai.models.generateContent({
+    model: GEMINI_TTS_MODEL,
+    contents: [{ parts: [{ text }] }],
+    config: {
+      responseModalities: [Modality.AUDIO],
+      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } }
+    }
   });
+  const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+  if (!base64Audio) throw new Error("Audio synthesis returned no data.");
+  return createWavBlobUrl(base64Audio, 24000);
 };
 
 // ─── generateImageForPrompt ──────────────────────────────────────────────────
@@ -439,31 +391,27 @@ export const generateImageForPrompt = async (
   prompt: string,
   realistic: boolean = false
 ): Promise<string> => {
-  if (shouldTryCallable()) {
-    try {
-      const fn = httpsCallable<unknown, { base64: string }>(getFns(), getCallableName("generateImageForPrompt"), { timeout: 120000 });
-      const result = await fn({ prompt, realistic });
-      return `data:image/png;base64,${result.data.base64}`;
-    } catch (error) {
-      if (!shouldFallbackToDirect(error)) throw error;
-    }
+  try {
+    const fn = httpsCallable<unknown, { base64: string }>(getFns(), "generateImage", { timeout: 120000 });
+    const result = await fn({ prompt, realistic });
+    return `data:image/png;base64,${result.data.base64}`;
+  } catch (error) {
+    if (!shouldFallbackToDirect(error)) throw error;
   }
 
-  return runDirectFallback(async () => {
-    const ai = getAIInstance();
-    const finalPrompt = realistic
-      ? `${prompt}. Cinematic photography, highly realistic, 8k resolution, natural lighting, sharp focus.`
-      : prompt;
-    const response = await ai.models.generateContent({
-      model: GEMINI_IMAGE_MODEL,
-      contents: { parts: [{ text: finalPrompt }] },
-      config: { imageConfig: { aspectRatio: "16:9" } }
-    });
-    for (const part of response.candidates?.[0]?.content.parts || []) {
-      if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
-    }
-    throw new Error("Image generation returned no image data.");
+  const ai = getAIInstance();
+  const finalPrompt = realistic
+    ? `${prompt}. Cinematic photography, highly realistic, 8k resolution, natural lighting, sharp focus.`
+    : prompt;
+  const response = await ai.models.generateContent({
+    model: GEMINI_IMAGE_MODEL,
+    contents: { parts: [{ text: finalPrompt }] },
+    config: { imageConfig: { aspectRatio: "16:9" } }
   });
+  for (const part of response.candidates?.[0]?.content.parts || []) {
+    if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
+  }
+  throw new Error("Image generation returned no image data.");
 };
 
 // ─── generateVideoForPrompt ──────────────────────────────────────────────────
