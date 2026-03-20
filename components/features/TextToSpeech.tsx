@@ -257,8 +257,8 @@ export const TextToSpeech: React.FC<Props> = ({
               <div className="neu-pressed p-6 rounded-2xl space-y-8">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div>
-                        <label className="text-sm font-bold text-neu-text-dark mb-3 block">Main Narrator Voice</label>
-                        <select className="w-full neu-pressed text-neu-text-dark p-4 rounded-xl text-sm focus:outline-none focus:ring-0" value={defaultVoiceKey} onChange={e => onDefaultVoiceKeyChange(e.target.value as PresetVoiceKey)}>
+                        <label htmlFor="defaultVoiceKeySelect" className="text-sm font-bold text-neu-text-dark mb-3 block">Main Narrator Voice</label>
+                        <select id="defaultVoiceKeySelect" className="w-full neu-pressed text-neu-text-dark p-4 rounded-xl text-sm focus:outline-none focus:ring-0" value={defaultVoiceKey} onChange={e => onDefaultVoiceKeyChange(e.target.value as PresetVoiceKey)}>
                             {PRESET_VOICE_KEYS_ORDERED.map(k => <option key={k} value={k}>{PRESET_VOICES_CONFIG[k].displayName}</option>)}
                         </select>
                     </div>

@@ -3,6 +3,7 @@
   "appId": "1:61465129511:web:ef0cc7db863cb49e03d402",
   "apiKey": "AIzaSyBOzmTevXrYY5Ev5i5pX28ZwrHBLKf26XQ",
   "authDomain": "chronos-video-forensics.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-37083281-4446-4ce5-823b-46bc1f882dbc",
   "storageBucket": "chronos-video-forensics.firebasestorage.app",
   "messagingSenderId": "61465129511",
   "measurementId": ""

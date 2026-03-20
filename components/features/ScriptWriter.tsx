@@ -151,8 +151,8 @@ export const ScriptWriter: React.FC<ScriptWriterProps> = ({
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-end">
               <div>
-                <label className="block text-sm font-bold text-neu-text-dark mb-3">Narrative Style</label>
-                <select value={initialScriptType} onChange={(e) => onScriptTypeChange(e.target.value as ScriptType)} className="w-full neu-pressed text-neu-text-dark rounded-xl p-4 text-sm focus:outline-none focus:ring-0">
+                <label htmlFor="script-type-select" className="block text-sm font-bold text-neu-text-dark mb-3">Narrative Style</label>
+                <select id="script-type-select" aria-label="Narrative Style" value={initialScriptType} onChange={(e) => onScriptTypeChange(e.target.value as ScriptType)} className="w-full neu-pressed text-neu-text-dark rounded-xl p-4 text-sm focus:outline-none focus:ring-0">
                   <option value={ScriptType.SingleVoice}>One Person Talking</option>
                   <option value={ScriptType.TwoVoice}>Two Person Dialogue</option>
                   <option value={ScriptType.MultiVoice}>Full Cinematic Cast</option>

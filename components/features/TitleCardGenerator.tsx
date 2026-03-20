@@ -156,17 +156,35 @@ export const TitleCardGenerator: React.FC<TitleCardGeneratorProps> = ({
           />
           <div className="grid grid-cols-2 gap-6">
             <div>
-              <label className="block text-xs font-bold text-neu-text-dark uppercase tracking-widest mb-2">Backing Matrix</label>
-              <input type="color" value={backgroundColor} onChange={(e) => setBackgroundColor(e.target.value)} className="w-full h-12 neu-pressed rounded-xl cursor-pointer" />
+              <label htmlFor="background-color" className="block text-xs font-bold text-neu-text-dark uppercase tracking-widest mb-2">Backing Matrix</label>
+              <input
+                id="background-color"
+                type="color"
+                title="Backing Matrix color"
+                placeholder="#000000"
+                aria-label="Backing Matrix color"
+                value={backgroundColor}
+                onChange={(e) => setBackgroundColor(e.target.value)}
+                className="w-full h-12 neu-pressed rounded-xl cursor-pointer"
+              />
             </div>
             <div>
-              <label className="block text-xs font-bold text-neu-text-dark uppercase tracking-widest mb-2">Glow Chromance</label>
-              <input type="color" value={textColor} onChange={(e) => setTextColor(e.target.value)} className="w-full h-12 neu-pressed rounded-xl cursor-pointer" />
+              <label htmlFor="text-color" className="block text-xs font-bold text-neu-text-dark uppercase tracking-widest mb-2">Glow Chromance</label>
+              <input
+                id="text-color"
+                type="color"
+                title="Glow Chromance color"
+                placeholder="#00f2ff"
+                aria-label="Glow Chromance color"
+                value={textColor}
+                onChange={(e) => setTextColor(e.target.value)}
+                className="w-full h-12 neu-pressed rounded-xl cursor-pointer"
+              />
             </div>
           </div>
           <div>
-            <label className="block text-xs font-bold text-neu-text-dark uppercase tracking-widest mb-2">Font Protocol</label>
-            <select value={fontFamily} onChange={(e) => setFontFamily(e.target.value)} className="w-full neu-pressed rounded-xl p-4 text-sm focus:outline-none">
+            <label htmlFor="font-family" className="block text-xs font-bold text-neu-text-dark uppercase tracking-widest mb-2">Font Protocol</label>
+            <select id="font-family" title="Font Protocol" aria-label="Font Protocol" value={fontFamily} onChange={(e) => setFontFamily(e.target.value)} className="w-full neu-pressed rounded-xl p-4 text-sm focus:outline-none">
               {FONT_FAMILIES.map(font => <option key={font} value={font}>{font.split(',')[0]}</option>)}
             </select>
           </div>
@@ -180,7 +198,7 @@ export const TitleCardGenerator: React.FC<TitleCardGeneratorProps> = ({
             <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} className="hidden"></canvas>
             <div className="aspect-video neu-pressed rounded-3xl overflow-hidden relative group">
                 {previewUrl ? (
-                    <img src={previewUrl} className="w-full h-full object-contain relative z-10" />
+                    <img src={previewUrl} alt={titleText || 'Title preview'} title={titleText || 'Title preview'} className="w-full h-full object-contain relative z-10" />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center text-neu-text font-black uppercase text-xs tracking-[0.5em]">Awaiting Ingest</div>
                 )}
@@ -195,7 +213,7 @@ export const TitleCardGenerator: React.FC<TitleCardGeneratorProps> = ({
             {titleCards.map(card => (
               <div key={card.id} className="neu-flat p-4 rounded-3xl flex flex-col group relative">
                 <div className="aspect-video rounded-2xl overflow-hidden neu-pressed mb-4">
-                    <img src={card.src} className="w-full h-full object-cover" />
+                    <img src={card.src} alt={card.titleText || `Title card ${card.id}`} title={card.titleText || `Title card ${card.id}`} className="w-full h-full object-cover" />
                 </div>
                 <div className="flex-grow">
                     <p className="text-xs font-black text-accent-orange uppercase mb-1">{card.titleText}</p>
