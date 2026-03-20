@@ -89,7 +89,38 @@
       border-radius: 4px;
     }
   </style>
-
+<script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.1.0/",
+    "react": "https://esm.sh/react@^19.1.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.0.1",
+    "@google-cloud/text-to-speech": "https://esm.sh/@google-cloud/text-to-speech@^5.3.0",
+    "jszip": "https://esm.sh/jszip@3.10.1"
+  }
+}
+</script>
+<script>
+  window.APP_CONFIG = {
+    CHRONOS_FUNCTIONS_MODE: "strict",
+    CHRONOS_CALLABLE_NAMES: {
+      generateStoryIdeas: "generateStoryIdeas",
+      generateScript: "generateScript",
+      analyzeScript: "analyzeScript",
+      analyzeCharacterAvatar: "analyzeCharacterAvatar",
+      generateSpeech: "generateSpeech",
+      generateImageForPrompt: "generateImage",
+      generateVideoForPrompt: "generateVideo"
+    },
+    CHRONOS_STRIPE_MODE: "strict",
+    CHRONOS_STRIPE_CHECKOUT_CALLABLE: "createCheckoutSession",
+    CHRONOS_STRIPE_PRICE_ID: "",
+    CHRONOS_STRIPE_SUCCESS_URL: "",
+    CHRONOS_STRIPE_CANCEL_URL: ""
+  };
+</script>
+<link rel="stylesheet" href="/index.css">
 </head>
 <body class="min-h-screen p-4 md:p-8 flex flex-col gap-6">
   <div id="root" class="flex flex-col h-full relative">

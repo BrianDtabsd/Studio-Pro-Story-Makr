@@ -15,6 +15,114 @@ import CheckoutModal from './components/CheckoutModal';
 import { InfoBar } from './components/InfoBar.tsx';
 import { FirebaseProvider, useFirebase } from './FirebaseContext';
 import { uploadImageAsset, uploadAudioAsset } from './services/storageService';
+import { computeProjectProgress } from './projectProgress.ts';
+
+const createDefaultProSettings = (): ProStorySettings => ({
+  contentStyle: ContentStyle.Drama,
+  topics: [],
+  characterCount: 1,
+  subGenre: STORY_SUB_GENRES[0].id,
+  characters: [],
+  primarySetting: '',
+  incitingIncidentIdea: '',
+  productionProtocol: ProductionProtocol.Cinematic,
+  videoBudget: 3,
+  realisticImages: false
+});
+
+const createEmptyProjectState = (isProUser = false): ProjectState => ({
+  projectId: undefined,
+  activeView: ActiveView.Hub,
+  lastEditorView: undefined,
+  storyIdeasKeywords: '',
+  generatedStoryIdeas: [],
+  selectedIdeaIds: [],
+  isProUser,
+  storyForScripting: null,
+  sw_scriptOutlines: {},
+  sw_generatedScripts: {},
+  sw_selectedScriptType: ScriptType.SingleVoice,
+  simg_sceneImageDefinitions: {},
+  simg_globalImageStylePrompt: 'Cinematic, high-detail, dramatic lighting, 8k resolution',
+  tts_editableScripts: {},
+  tts_defaultVoiceKey: 'Narrator_M',
+  tts_characterVoicePresets: {},
+  tcg_titleCards: {},
+  ffimg_prompt: '',
+  ffimg_generatedImages: [],
+  tm_prompt: '',
+  tm_generatedThumbnail: null,
+  analyzedScriptData: {},
+  audioChunks: {},
+});
+
+const createProjectId = () =>
+  `proj_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+const isLocalMediaUrl = (url: string | undefined) =>
+  !!url && (url.startsWith('data:') || url.startsWith('blob:'));
+
+const stateHasPersistableContent = (state: ProjectState): boolean =>
+  state.storyIdeasKeywords.trim().length > 0 ||
+  state.generatedStoryIdeas.length > 0 ||
+  state.selectedIdeaIds.length > 0 ||
+  !!state.storyForScripting ||
+  Object.keys(state.sw_scriptOutlines).length > 0 ||
+  Object.keys(state.sw_generatedScripts).length > 0 ||
+  Object.keys(state.audioChunks).length > 0 ||
+  Object.keys(state.simg_sceneImageDefinitions).length > 0 ||
+  !!state.tm_generatedThumbnail ||
+  state.ffimg_generatedImages.length > 0;
+
+const hasGeneratedVisuals = (state: ProjectState): boolean =>
+  Object.values(state.simg_sceneImageDefinitions).some((scenes) =>
+    scenes.some((scene) => !!scene.generatedImageUrl || !!scene.generatedVideoUrl)
+  );
+
+const hasGeneratedAudio = (state: ProjectState): boolean =>
+  Object.values(state.audioChunks).some((chunks) =>
+    chunks.some((chunk) => !!chunk.audioDataUrl && chunk.audioDataUrl.trim().length > 0)
+  );
+
+const deriveResumeViewFromState = (state: ProjectState): ActiveView => {
+  const preferred = state.lastEditorView || state.activeView;
+  if (preferred && preferred !== ActiveView.Hub) return preferred;
+  if (hasGeneratedVisuals(state) || Object.keys(state.simg_sceneImageDefinitions).length > 0) return ActiveView.SceneImages;
+  if (hasGeneratedAudio(state) || Object.keys(state.analyzedScriptData).length > 0) return ActiveView.TextToSpeech;
+  if (Object.keys(state.sw_generatedScripts).length > 0 || Object.keys(state.sw_scriptOutlines).length > 0) return ActiveView.ScriptWriter;
+  if (state.generatedStoryIdeas.length > 0 || state.storyIdeasKeywords.trim().length > 0) return ActiveView.StoryIdeas;
+  return ActiveView.StoryIdeas;
+};
+
+const deriveProjectIdentity = (state: ProjectState): { id: string; title: string; description: string } | null => {
+  if (!stateHasPersistableContent(state)) return null;
+
+  const idea =
+    state.storyForScripting ||
+    state.generatedStoryIdeas.find((i) => state.selectedIdeaIds.includes(i.id)) ||
+    state.generatedStoryIdeas.find((i) => !i.isSeriesConcept) ||
+    state.generatedStoryIdeas[0];
+
+  const fallbackTitle = state.storyIdeasKeywords.trim().slice(0, 80);
+  const fallbackDescription = state.storyIdeasKeywords.trim().slice(0, 500);
+  const title = (idea?.title || fallbackTitle || 'Untitled Project').trim();
+  const description = (idea?.description || fallbackDescription || 'Story project draft').trim();
+  return {
+    id: state.projectId || createProjectId(),
+    title,
+    description,
+  };
+};
+
+const clearStaleGenerationFlags = (state: ProjectState): ProjectState => ({
+  ...state,
+  simg_sceneImageDefinitions: Object.fromEntries(
+    Object.entries(state.simg_sceneImageDefinitions).map(([ideaId, scenes]) => [
+      ideaId,
+      scenes.map((scene) => ({ ...scene, isGenerating: false })),
+    ])
+  ),
+});
 
 const createDefaultProSettings = (): ProStorySettings => ({
   contentStyle: ContentStyle.Drama,
@@ -163,7 +271,7 @@ const AppContent: React.FC = () => {
       ...state,
       simg_sceneImageDefinitions: Object.fromEntries(
         Object.entries(state.simg_sceneImageDefinitions).map(([id, scenes]) => [
-          id, scenes.map(s => ({ ...s, generatedImageUrl: cleanUrl(s.generatedImageUrl), generatedVideoUrl: cleanUrl(s.generatedVideoUrl) }))
+          id, scenes.map(s => ({ ...s, generatedImageUrl: cleanUrl(s.generatedImageUrl), generatedVideoUrl: cleanUrl(s.generatedVideoUrl), isGenerating: false }))
         ])
       ),
       audioChunks: Object.fromEntries(
@@ -416,13 +524,14 @@ const AppContent: React.FC = () => {
         onUpgradeToPro={handleUpgradeToPro}
         onCreateProject={handleCreateProject}
         onLoadProject={(p) => {
-          const resumeView = deriveResumeViewFromState(p.state);
+          const hydratedState = clearStaleGenerationFlags(p.state);
+          const resumeView = deriveResumeViewFromState(hydratedState);
           const loadedState: ProjectState = {
-            ...p.state,
-            projectId: p.state.projectId || p.id,
+            ...hydratedState,
+            projectId: hydratedState.projectId || p.id,
             activeView: resumeView,
-            lastEditorView: p.state.lastEditorView || (resumeView !== ActiveView.Hub ? resumeView : undefined),
-            isProUser: !!profile?.isPro || p.state.isProUser,
+            lastEditorView: hydratedState.lastEditorView || (resumeView !== ActiveView.Hub ? resumeView : undefined),
+            isProUser: !!profile?.isPro || hydratedState.isProUser,
           };
           setProjectState(loadedState);
           const loadedSettings =
@@ -505,6 +614,8 @@ const AppContent: React.FC = () => {
           defaultVoiceKey={projectState.tts_defaultVoiceKey}
           onDefaultVoiceKeyChange={(v) => setProjectState(prev => ({ ...prev, tts_defaultVoiceKey: v }))}
           characterVoicePresets={projectState.tts_characterVoicePresets}
+          analyzedScripts={projectState.analyzedScriptData}
+          onAnalyzedScriptsChange={(s) => setProjectState(prev => ({ ...prev, analyzedScriptData: s }))}
           audioChunks={projectState.audioChunks}
           onAudioChunksChange={handleAudioChunksChange}
           onNavigateToNextStep={() => setActiveView(ActiveView.SceneImages)}

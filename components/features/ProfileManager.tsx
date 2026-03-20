@@ -1,7 +1,8 @@
 
-import React, { useState, useRef } from 'react';
-import { Project, UserProfile, ContentStyle } from '../../types.ts';
-import { uploadAvatarAsset } from '../../services/storageService';
+import React from 'react';
+import { Project, UserProfile, ActiveView } from '../../types.ts';
+import { ActionButton } from '../common/ActionButton.tsx';
+import { computeProjectProgress, getWorkflowStats } from '../../projectProgress.ts';
 
 // ── Mascot ────────────────────────────────────────────────────────────────────
 // "Mak" — minimal SVG face, three expressions.
@@ -129,6 +130,8 @@ interface ProfileManagerProps {
   onSignIn: () => void;
   onSignOut: () => void;
   onUpgradeToPro: () => void;
+  authError?: string | null;
+  billingError?: string | null;
   onCreateProject: () => void;
   onLoadProject: (project: Project) => void;
   onDeleteProject: (id: string) => void;
@@ -138,8 +141,7 @@ interface ProfileManagerProps {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export const ProfileManager: React.FC<ProfileManagerProps> = ({
-  currentUser, projects, onSignIn, onSignOut, onUpgradeToPro,
-  onCreateProject, onLoadProject, onDeleteProject, onUpdateProfile, userId,
+  currentUser, projects, onSignIn, onSignOut, onUpgradeToPro, authError, billingError, onCreateProject, onLoadProject, onDeleteProject
 }) => {
 
   // ── Not signed in ───────────────────────────────────────────────────────────
@@ -148,8 +150,18 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({
       <div className="min-h-[60vh] flex items-center justify-center">
         <div className="neu-flat p-12 rounded-3xl w-full max-w-md animate-in fade-in zoom-in duration-500">
           <div className="text-center mb-10">
-            <h2 className="text-3xl font-black text-neu-text-dark uppercase tracking-tighter mb-2">Sign In</h2>
-            <p className="text-xs text-neu-text uppercase tracking-widest font-bold">Access your Studio</p>
+            <h2 className="text-3xl font-black text-neu-text-dark uppercase tracking-tighter mb-2">Login</h2>
+            <p className="text-xs text-neu-text uppercase tracking-widest font-bold">Access your Studio Project</p>
+          </div>
+          <div className="space-y-6">
+            <ActionButton onClick={onSignIn} className="w-full py-5 flex items-center justify-center gap-3">
+                <span className="text-lg">G</span> SIGN IN WITH GOOGLE
+            </ActionButton>
+            {authError && (
+              <div className="text-xs font-bold text-red-500 uppercase tracking-wider text-center">
+                {authError}
+              </div>
+            )}
           </div>
           <button
             onClick={onSignIn}
@@ -217,91 +229,75 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({
     return `${Math.floor(hrs / 24)}d ago`;
   };
 
-  const computedProgress = (project: Project) => {
-    const state = project.state;
-    if (!state) return Math.max(0, Math.min(100, project.progress || 0));
-    let progress = 0;
-    if (state.storyIdeasKeywords?.trim().length > 0 || state.generatedStoryIdeas?.length > 0) progress += 15;
-    if ((state.selectedIdeaIds?.length || 0) > 0 || !!state.storyForScripting) progress += 10;
-    if (Object.keys(state.sw_scriptOutlines || {}).some((k) => (state.sw_scriptOutlines[k] || '').trim().length > 0)) progress += 10;
-    if (Object.keys(state.sw_generatedScripts || {}).some((k) => (state.sw_generatedScripts[k] || '').trim().length > 0)) progress += 20;
-    if (Object.keys(state.analyzedScriptData || {}).some((k) => !!state.analyzedScriptData[k])) progress += 10;
-    if (Object.keys(state.audioChunks || {}).some((k) => (state.audioChunks[k] || []).some((c) => !!c.audioDataUrl))) progress += 15;
-    if (Object.keys(state.simg_sceneImageDefinitions || {}).some((k) => (state.simg_sceneImageDefinitions[k] || []).some((s) => !!s.generatedImageUrl || !!s.generatedVideoUrl))) progress += 10;
-    if (state.tm_generatedThumbnail) progress += 5;
-    if (Object.keys(state.tcg_titleCards || {}).some((k) => (state.tcg_titleCards[k] || []).length > 0)) progress += 5;
-    return Math.max(0, Math.min(100, progress));
+  const resumeViewLabel = (view?: ActiveView) => {
+    switch (view) {
+      case ActiveView.ScriptWriter: return 'Script';
+      case ActiveView.TextToSpeech: return 'Voice';
+      case ActiveView.SceneImages: return 'Visuals';
+      case ActiveView.ThumbnailMaker: return 'Cover';
+      case ActiveView.ProjectExport: return 'Export';
+      case ActiveView.StoryIdeas: return 'Settings';
+      default: return 'Settings';
+    }
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-700">
-
-      {/* ── Profile header ──────────────────────────────────────────────────── */}
-      <div className="neu-flat p-8 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
-        <div className="flex items-center gap-5 relative z-10">
-          <AvatarDisplay profile={{ ...currentUser, avatarChoice }} size={64} />
+    <div className="space-y-12 animate-in fade-in duration-700">
+      <div className="flex flex-col md:flex-row items-center justify-between gap-8 neu-flat p-8 rounded-3xl relative overflow-hidden">
+        <div className="flex items-center gap-6 relative z-10">
+          <div className="w-20 h-20 rounded-full neu-pressed flex items-center justify-center text-3xl font-black text-accent-orange">
+            {currentUser.username[0].toUpperCase()}
+          </div>
           <div>
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2">
               <h2 className="text-2xl font-black text-neu-text-dark uppercase tracking-tighter">{currentUser.username}</h2>
               {currentUser.isPro && (
-                <span className="bg-accent-orange text-white text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest">PRO</span>
+                <span className="bg-accent-orange text-white text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest shadow-sm">PRO</span>
               )}
             </div>
-            {currentUser.bio
-              ? <p className="text-sm text-neu-text italic">"{currentUser.bio}"</p>
-              : <p className="text-[10px] text-neu-text uppercase tracking-widest">Member since {new Date(currentUser.joinedDate).toLocaleDateString()}</p>
-            }
+            <p className="text-xs text-neu-text font-bold uppercase tracking-widest">Active User • Joined {new Date(currentUser.joinedDate).toLocaleDateString()}</p>
           </div>
         </div>
-        <div className="flex items-center gap-3 relative z-10">
+        <div className="flex items-center gap-4 relative z-10">
           {!currentUser.isPro && (
             <button
               onClick={onUpgradeToPro}
-              className="neu-btn px-5 py-2 text-xs font-black text-accent-orange uppercase tracking-widest border border-accent-orange/20"
+              className="neu-btn px-6 py-2 text-xs font-black text-accent-orange hover:bg-accent-orange hover:text-white uppercase tracking-widest transition-all border border-accent-orange/20"
             >
               Upgrade to Pro
             </button>
           )}
-          <button
-            onClick={onCreateProject}
-            className="neu-btn px-8 py-3 text-sm font-black text-neu-text-dark uppercase tracking-widest"
-          >
-            New Project
-          </button>
+          <button onClick={onSignOut} className="neu-btn px-6 py-2 text-xs font-bold text-neu-text hover:text-red-500 uppercase tracking-widest transition-colors">Sign Out</button>
+          <ActionButton onClick={onCreateProject} className="px-10 py-3">START NEW PROJECT</ActionButton>
         </div>
+        {billingError && (
+          <div className="w-full md:w-auto md:absolute md:bottom-3 md:right-8 text-xs font-bold text-red-500 uppercase tracking-wider">
+            {billingError}
+          </div>
+        )}
+        {authError && (
+          <div className="w-full md:w-auto md:absolute md:bottom-8 md:right-8 text-xs font-bold text-red-500 uppercase tracking-wider">
+            {authError}
+          </div>
+        )}
       </div>
 
-      {/* ── Tabs ────────────────────────────────────────────────────────────── */}
-      <div className="flex gap-1 neu-pressed rounded-2xl p-1.5 w-fit">
-        {(['projects', 'guide', 'account'] as const).map(t => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
-              tab === t ? 'neu-flat text-neu-text-dark' : 'text-neu-text hover:text-neu-text-dark'
-            }`}
-          >
-            {t === 'projects' ? 'Projects' : t === 'guide' ? 'How It Works' : 'Account'}
-          </button>
-        ))}
-      </div>
-
-      {/* ══ Projects tab ═══════════════════════════════════════════════════════ */}
-      {tab === 'projects' && (
-        <div className="space-y-6">
-          {projects.length === 0 ? (
-            <div className="py-24 text-center neu-pressed rounded-3xl flex flex-col items-center gap-5">
-              <Mak expression="think" size={56} />
-              <div>
-                <p className="text-neu-text-dark font-black uppercase tracking-widest text-sm mb-1">No projects yet</p>
-                <p className="text-xs text-neu-text font-medium">Hit New Project and I'll help you build something.</p>
-              </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {projects.map(project => {
-                const progress = computedProgress(project);
-                return (
+      <div className="space-y-6">
+        <h3 className="text-sm font-bold text-neu-text-dark uppercase px-2">Your Projects</h3>
+        {projects.length === 0 ? (
+          <div className="py-32 text-center neu-pressed rounded-3xl">
+            <p className="text-neu-text italic text-sm font-bold">No projects found. Click "Start New Project" to begin.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {projects.map((project) => {
+              const progress = project.state
+                ? computeProjectProgress(project.state)
+                : Math.max(0, Math.min(100, project.progress || 0));
+              const stats = project.state
+                ? getWorkflowStats(project.state)
+                : { workflow: 'single' as const, episodeCount: 1, scriptCount: 0, audioCount: 0, visualCount: 0, resumeView: undefined };
+              return (
                 <div key={project.id} className="group relative neu-flat rounded-3xl hover:scale-[1.02] transition-all duration-500 flex flex-col overflow-hidden">
                   <div className="aspect-video neu-pressed relative overflow-hidden m-4 rounded-2xl">
                     {project.thumbnailUrl ? (
