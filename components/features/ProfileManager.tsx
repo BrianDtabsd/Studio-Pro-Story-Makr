@@ -1,8 +1,9 @@
 
-import React from 'react';
-import { Project, UserProfile, ActiveView } from '../../types.ts';
+import React, { useRef, useState } from 'react';
+import { Project, UserProfile, ActiveView, ContentStyle } from '../../types.ts';
 import { ActionButton } from '../common/ActionButton.tsx';
 import { computeProjectProgress, getWorkflowStats } from '../../projectProgress.ts';
+import { uploadAvatarAsset } from '../../services/storageService.ts';
 
 // ── Mascot ────────────────────────────────────────────────────────────────────
 // "Mak" — minimal SVG face, three expressions.
@@ -141,7 +142,18 @@ interface ProfileManagerProps {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export const ProfileManager: React.FC<ProfileManagerProps> = ({
-  currentUser, projects, onSignIn, onSignOut, onUpgradeToPro, authError, billingError, onCreateProject, onLoadProject, onDeleteProject
+  currentUser,
+  projects,
+  onSignIn,
+  onSignOut,
+  onUpgradeToPro,
+  authError,
+  billingError,
+  onCreateProject,
+  onLoadProject,
+  onDeleteProject,
+  onUpdateProfile,
+  userId,
 }) => {
 
   // ── Not signed in ───────────────────────────────────────────────────────────
@@ -282,6 +294,28 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({
         )}
       </div>
 
+      <div className="flex flex-wrap items-center gap-3 px-2">
+        <button
+          onClick={() => setTab('projects')}
+          className={`neu-btn px-4 py-2 text-xs font-black uppercase tracking-widest ${tab === 'projects' ? 'text-accent-orange border border-accent-orange/30' : 'text-neu-text'}`}
+        >
+          Projects
+        </button>
+        <button
+          onClick={() => setTab('guide')}
+          className={`neu-btn px-4 py-2 text-xs font-black uppercase tracking-widest ${tab === 'guide' ? 'text-accent-orange border border-accent-orange/30' : 'text-neu-text'}`}
+        >
+          Guide
+        </button>
+        <button
+          onClick={() => setTab('account')}
+          className={`neu-btn px-4 py-2 text-xs font-black uppercase tracking-widest ${tab === 'account' ? 'text-accent-orange border border-accent-orange/30' : 'text-neu-text'}`}
+        >
+          Account
+        </button>
+      </div>
+
+      {tab === 'projects' && (
       <div className="space-y-6">
         <h3 className="text-sm font-bold text-neu-text-dark uppercase px-2">Your Projects</h3>
         {projects.length === 0 ? (

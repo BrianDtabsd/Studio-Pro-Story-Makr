@@ -52,6 +52,19 @@ Detailed branch/PR incident protocol is maintained in `AGENTS.md`.
      - `GEMINI_API_KEY`
      - `VITE_STRIPE_PUBLISHABLE_KEY` (for embedded Stripe checkout)
 
-4. **Cloud Function auth expectations**
+4. **Story Makr AI runtime config (recommended)**
+   - Prefer Story Makr-native env vars in `.env.local`:
+     - `STORYMAKR_AI_MODE=strict`
+     - Optional callable overrides:
+       - `STORYMAKR_AI_GENERATE_STORY_IDEAS_CALLABLE`
+       - `STORYMAKR_AI_GENERATE_SCRIPT_CALLABLE`
+       - `STORYMAKR_AI_ANALYZE_SCRIPT_CALLABLE`
+       - `STORYMAKR_AI_ANALYZE_CHARACTER_AVATAR_CALLABLE`
+       - `STORYMAKR_AI_GENERATE_SPEECH_CALLABLE`
+       - `STORYMAKR_AI_GENERATE_IMAGE_CALLABLE`
+       - `STORYMAKR_AI_GENERATE_VIDEO_CALLABLE`
+   - Legacy `CHRONOS_*` keys are still supported for compatibility, but new setup should use `STORYMAKR_*` keys.
+
+5. **Cloud Function auth expectations**
    - Callable generation endpoints require Firebase auth.
-   - App now falls back to direct Gemini generation when callable auth/permission/unavailable errors occur, but production should still keep callable auth healthy.
+   - Story Makr is currently configured as Cloud-Functions-first for generation flows; keep callable auth and names aligned with deployed functions.

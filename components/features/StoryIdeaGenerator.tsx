@@ -7,7 +7,7 @@ import { SectionCard } from '../SectionCard.tsx';
 import { LoadingSpinner } from '../LoadingSpinner.tsx';
 import { ErrorDisplay } from '../ErrorDisplay.tsx';
 import { STORY_IDEAS_PLACEHOLDER, PRESET_VOICE_KEYS_ORDERED, PRESET_VOICES_CONFIG } from '../../constants.ts';
-import { StoryIdea, VIDEO_GENRES, VideoGenreId, ProStorySettings, STORY_SUB_GENRES, CharacterDefinition, PresetVoiceKey, ContentStyle, PodcastFormat } from '../../types.ts';
+import { StoryIdea, VIDEO_GENRES, VideoGenreId, ProStorySettings, STORY_SUB_GENRES, CharacterDefinition, CharacterVoicePreset, PresetVoiceKey, ContentStyle, PodcastFormat, StorySubGenreId } from '../../types.ts';
 
 interface Props {
   onIdeasGenerated: (k: string, i: StoryIdea[]) => void;
@@ -18,8 +18,8 @@ interface Props {
   setSelectedIdeaIds: (ids: string[] | ((prev: string[]) => string[])) => void;
   isProUser: boolean;
   proSettings: ProStorySettings;
-  onProSettingsChange: (s: any) => void;
-  onCharacterVoicePresetsChange: (u: any) => void;
+  onProSettingsChange: React.Dispatch<React.SetStateAction<ProStorySettings>>;
+  onCharacterVoicePresetsChange: React.Dispatch<React.SetStateAction<Record<string, CharacterVoicePreset>>>;
 }
 
 export const StoryIdeaGenerator: React.FC<Props> = ({ 
@@ -40,16 +40,22 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
   const proAudiences = ['Adults (18+)'];
   const mediums = ['Live Action', 'Animation'];
   const proMediums = ['Live Action (Indie)', 'Puppets', 'Claymation', 'Stop Motion'];
+  const audienceSubGenreMap: Record<string, StorySubGenreId> = {
+    Kids: 'general',
+    Everyone: 'general',
+    Teens: 'drama',
+    'Adults (18+)': 'mystery',
+  };
 
   const handleAddChar = () => {
     const c: CharacterDefinition = { id: `c-${Date.now()}`, name: '', gender: 'Other', personality: '', physicalDescription: '', relationalStatus: '', voicePresetKey: 'Narrator_F' };
-    onProSettingsChange((prev: any) => ({ ...prev, characters: [...prev.characters, c] }));
+    onProSettingsChange((prev) => ({ ...prev, characters: [...prev.characters, c] }));
   };
 
-  const handleCharChange = (id: string, field: string, val: any) => {
-    onProSettingsChange((prev: any) => ({
+  const handleCharChange = <K extends keyof CharacterDefinition>(id: string, field: K, val: CharacterDefinition[K]) => {
+    onProSettingsChange((prev) => ({
       ...prev,
-      characters: prev.characters.map((c: any) => c.id === id ? { ...c, [field]: val } : c)
+      characters: prev.characters.map((c) => c.id === id ? { ...c, [field]: val } : c)
     }));
   };
 
@@ -60,7 +66,7 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
   };
 
   const toggleTopic = (topicId: VideoGenreId) => {
-    onProSettingsChange((prev: any) => {
+    onProSettingsChange((prev) => {
       const topics = prev.topics || [];
       if (topics.includes(topicId)) {
         return { ...prev, topics: topics.filter((t: VideoGenreId) => t !== topicId) };
@@ -83,12 +89,12 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
         `${fullKeywords} | Audience: ${targetAudience} | Visual Style: ${medium} | Format: ${format}`, 
         proSettings.topics || [], 
         format, 
-        { ...proSettings, subGenre: targetAudience as any }, // Pass audience as subGenre for tone
+        { ...proSettings, subGenre: audienceSubGenreMap[targetAudience] || 'general' },
         variationCount
       );
       onIdeasGenerated(keywords, ideas);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Story idea generation failed.');
     } finally {
       setLoading(false);
     }
@@ -132,7 +138,7 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
                 <button 
                   key={pf}
                   type="button"
-                  onClick={() => onProSettingsChange((prev: any) => ({ ...prev, podcastFormat: prev.podcastFormat === pf ? undefined : pf }))}
+                  onClick={() => onProSettingsChange((prev) => ({ ...prev, podcastFormat: prev.podcastFormat === pf ? undefined : pf }))}
                   className={`neu-btn px-4 py-2 text-xs font-medium ${proSettings.podcastFormat === pf ? 'neu-active-orange text-neu-text-dark' : 'text-neu-text'}`}
                 >
                   {pf}
@@ -150,7 +156,7 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
               <button 
                 key={style}
                 type="button"
-                onClick={() => onProSettingsChange((prev: any) => ({ ...prev, contentStyle: style }))}
+                onClick={() => onProSettingsChange((prev) => ({ ...prev, contentStyle: style }))}
                 className={`neu-btn px-4 py-2 text-xs font-medium ${proSettings.contentStyle === style ? 'neu-active-orange text-neu-text-dark' : 'text-neu-text'}`}
               >
                 {style}
@@ -195,14 +201,14 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
           <div className="flex flex-wrap gap-3">
             <button 
               type="button"
-              onClick={() => onProSettingsChange((prev: any) => ({ ...prev, characterCount: 1 }))}
+              onClick={() => onProSettingsChange((prev) => ({ ...prev, characterCount: 1 }))}
               className={`neu-btn px-4 py-2 text-xs font-medium ${proSettings.characterCount === 1 ? 'neu-active-orange text-neu-text-dark' : 'text-neu-text'}`}
             >
               1 Character / Narrator
             </button>
             <button 
               type="button"
-              onClick={() => onProSettingsChange((prev: any) => ({ ...prev, characterCount: 2 }))}
+              onClick={() => onProSettingsChange((prev) => ({ ...prev, characterCount: 2 }))}
               className={`neu-btn px-4 py-2 text-xs font-medium ${proSettings.characterCount === 2 ? 'neu-active-orange text-neu-text-dark' : 'text-neu-text'}`}
             >
               2 Characters / Interview
@@ -441,7 +447,7 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
                     rows={3}
                     placeholder="Where and when does this take place?"
                     value={proSettings.primarySetting}
-                    onChange={e => onProSettingsChange((prev: any) => ({ ...prev, primarySetting: e.target.value }))}
+                    onChange={e => onProSettingsChange((prev) => ({ ...prev, primarySetting: e.target.value }))}
                   ></textarea>
                 </div>
               </div>
@@ -455,7 +461,7 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
                 <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
                   {proSettings.characters.map(c => (
                     <div key={c.id} className="neu-pressed p-3 flex flex-col gap-2 relative">
-                      <button type="button" onClick={() => onProSettingsChange((prev: any) => ({ ...prev, characters: prev.characters.filter((x:any) => x.id !== c.id) }))} className="absolute top-2 right-2 text-red-500 text-xs font-bold">X</button>
+                      <button type="button" onClick={() => onProSettingsChange((prev) => ({ ...prev, characters: prev.characters.filter((x) => x.id !== c.id) }))} className="absolute top-2 right-2 text-red-500 text-xs font-bold">X</button>
                       <input 
                         placeholder="Character Name" 
                         value={c.name} 

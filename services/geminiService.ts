@@ -1,5 +1,3 @@
-import { getFunctions, httpsCallable } from "firebase/functions";
-import { getApp } from "firebase/app";
 import {
   StoryIdea,
   ScriptType,
@@ -7,17 +5,18 @@ import {
   ProStorySettings,
   AIAnalyzedScript,
   PresetVoiceKey,
+  CharacterDefinition,
 } from "../types.ts";
-import { getChronosCallableNames, getChronosFunctionsMode, type ChronosCallableKey } from "../appConfig.ts";
+import { getStoryMakrCallableNames, getStoryMakrFunctionsMode, type StoryMakrCallableKey } from "../appConfig.ts";
+import { makeCallable } from "./firebaseFunctions.ts";
 
-const getFns = () => getFunctions(getApp(), "us-central1");
-const getCallableName = (key: ChronosCallableKey): string => getChronosCallableNames()[key];
+const getCallableName = (key: StoryMakrCallableKey): string => getStoryMakrCallableNames()[key];
 
 const ensureCloudFunctionsEnabled = () => {
-  const mode = getChronosFunctionsMode();
+  const mode = getStoryMakrFunctionsMode();
   if (mode === "off") {
     throw new Error(
-      "CHRONOS_FUNCTIONS_MODE is 'off'. This build is Cloud-Functions-only. Set CHRONOS_FUNCTIONS_MODE to 'strict' or 'fallback'."
+      "STORYMAKR_AI_MODE is 'off'. This build is Cloud-Functions-only. Set STORYMAKR_AI_MODE to 'strict' or 'fallback'."
     );
   }
 };
@@ -38,24 +37,48 @@ const fail = (prefix: string, error: unknown): never => {
   throw new Error(`${prefix} ${asMessage(error)}`.trim());
 };
 
-const readBase64 = (data: any): string | null =>
-  (typeof data?.base64 === "string" && data.base64) ||
-  (typeof data?.imageBase64 === "string" && data.imageBase64) ||
-  (typeof data?.data?.base64 === "string" && data.data.base64) ||
-  null;
+type UnknownRecord = Record<string, unknown>;
 
-const readUrl = (data: any): string | null =>
-  (typeof data?.url === "string" && data.url) ||
-  (typeof data?.videoUrl === "string" && data.videoUrl) ||
-  (typeof data?.resultUrl === "string" && data.resultUrl) ||
-  (typeof data?.data?.url === "string" && data.data.url) ||
-  null;
+const asRecord = (value: unknown): UnknownRecord | null =>
+  typeof value === "object" && value !== null ? (value as UnknownRecord) : null;
 
-const call = <Req, Res>(key: ChronosCallableKey, timeout?: number) =>
-  httpsCallable<Req, Res>(getFns(), getCallableName(key), timeout ? { timeout } : undefined);
+const readStringFromRecord = (record: UnknownRecord | null, key: string): string | null => {
+  if (!record) return null;
+  const value = record[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
+};
 
-const ensureIdeas = (data: any): StoryIdea[] => {
-  const ideas = data?.ideas;
+const readNestedRecord = (record: UnknownRecord | null, key: string): UnknownRecord | null =>
+  asRecord(record ? record[key] : null);
+
+const readBase64 = (data: unknown): string | null => {
+  const root = asRecord(data);
+  return (
+    readStringFromRecord(root, "base64") ||
+    readStringFromRecord(root, "imageBase64") ||
+    readStringFromRecord(readNestedRecord(root, "data"), "base64")
+  );
+};
+
+const readUrl = (data: unknown): string | null => {
+  const root = asRecord(data);
+  return (
+    readStringFromRecord(root, "url") ||
+    readStringFromRecord(root, "videoUrl") ||
+    readStringFromRecord(root, "resultUrl") ||
+    readStringFromRecord(readNestedRecord(root, "data"), "url")
+  );
+};
+
+const call = <Req, Res>(key: StoryMakrCallableKey, timeout?: number) =>
+  makeCallable<Req, Res>(getCallableName(key), timeout ? { timeout } : undefined);
+
+interface StoryIdeasResponse {
+  ideas?: unknown;
+}
+
+const ensureIdeas = (data: StoryIdeasResponse): StoryIdea[] => {
+  const ideas = data.ideas;
   if (!Array.isArray(ideas)) {
     throw new Error("Callable returned no ideas array.");
   }
@@ -149,7 +172,7 @@ export const generateScript = async (
 
 export const analyzeScript = async (
   fullScript: string,
-  characterDefinitions: any[] = []
+  characterDefinitions: CharacterDefinition[] = []
 ): Promise<AIAnalyzedScript> => {
   ensureCloudFunctionsEnabled();
   try {
@@ -229,7 +252,10 @@ export const generateVideoForPrompt = async (
 ): Promise<string> => {
   ensureCloudFunctionsEnabled();
   try {
-    const fn = call<unknown, any>("generateVideoForPrompt", 300000);
+    const fn = call<
+      { prompt: string; resolution: "720p" | "1080p"; imageUrl?: string },
+      { url?: string; videoUrl?: string; resultUrl?: string; data?: { url?: string } }
+    >("generateVideoForPrompt", 300000);
     const result = await fn({ prompt, resolution: res, imageUrl: img });
     const url = readUrl(result.data);
     if (!url) {
