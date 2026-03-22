@@ -7,16 +7,16 @@ import {
   PresetVoiceKey,
   CharacterDefinition,
 } from "../types.ts";
-import { getChronosCallableNames, getChronosFunctionsMode, type ChronosCallableKey } from "../appConfig.ts";
+import { getStoryMakrCallableNames, getStoryMakrFunctionsMode, type StoryMakrCallableKey } from "../appConfig.ts";
 import { makeCallable } from "./firebaseFunctions.ts";
 
-const getCallableName = (key: ChronosCallableKey): string => getChronosCallableNames()[key];
+const getCallableName = (key: StoryMakrCallableKey): string => getStoryMakrCallableNames()[key];
 
 const ensureCloudFunctionsEnabled = () => {
-  const mode = getChronosFunctionsMode();
+  const mode = getStoryMakrFunctionsMode();
   if (mode === "off") {
     throw new Error(
-      "CHRONOS_FUNCTIONS_MODE is 'off'. This build is Cloud-Functions-only. Set CHRONOS_FUNCTIONS_MODE to 'strict' or 'fallback'."
+      "STORYMAKR_AI_MODE is 'off'. This build is Cloud-Functions-only. Set STORYMAKR_AI_MODE to 'strict' or 'fallback'."
     );
   }
 };
@@ -70,7 +70,7 @@ const readUrl = (data: unknown): string | null => {
   );
 };
 
-const call = <Req, Res>(key: ChronosCallableKey, timeout?: number) =>
+const call = <Req, Res>(key: StoryMakrCallableKey, timeout?: number) =>
   makeCallable<Req, Res>(getCallableName(key), timeout ? { timeout } : undefined);
 
 interface StoryIdeasResponse {

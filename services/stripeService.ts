@@ -1,4 +1,4 @@
-import { getAppConfig } from '../appConfig.ts';
+import { getStoryMakrStripeCheckoutCallable } from '../appConfig.ts';
 import { makeCallable } from './firebaseFunctions.ts';
 
 interface CreateCheckoutSessionRequest {
@@ -10,8 +10,7 @@ interface CreateCheckoutSessionResponse {
   clientSecret: string;
 }
 
-const readCheckoutCallableName = (): string =>
-  getAppConfig().CHRONOS_STRIPE_CHECKOUT_CALLABLE || 'createCheckoutSession';
+const readCheckoutCallableName = (): string => getStoryMakrStripeCheckoutCallable();
 
 export const createCheckoutSession = async (
   priceId: string
