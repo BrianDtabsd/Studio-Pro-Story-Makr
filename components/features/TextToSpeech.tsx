@@ -77,8 +77,14 @@ export const TextToSpeech: React.FC<Props> = ({
     }
   };
 
-  const synthesizeEpisode = async (episodeId: string, script: string, analyzed: AIAnalyzedScript) => {
-    const episodeChunks: SynthesizedChunk[] = [...(audioChunks[episodeId] || [])];
+  const synthesizeEpisode = async (
+    episodeId: string,
+    _script: string,
+    analyzed: AIAnalyzedScript,
+    baseAudioChunks: Record<string, SynthesizedChunk[]>
+  ): Promise<Record<string, SynthesizedChunk[]>> => {
+    const episodeChunks: SynthesizedChunk[] = [...(baseAudioChunks[episodeId] || [])];
+    let nextAudioChunks: Record<string, SynthesizedChunk[]> = { ...baseAudioChunks };
     for (const scene of analyzed.scenes) {
       if (episodeChunks.some(c => c.sceneNumbers.includes(scene.sceneNumber))) continue;
       if (!scene.dialogue || scene.dialogue.length === 0) continue;
@@ -91,9 +97,11 @@ export const TextToSpeech: React.FC<Props> = ({
         downloadFilename: `ep_${episodeId}_scene_${scene.sceneNumber}.wav` 
       };
       episodeChunks.push(chunk);
-      onAudioChunksChange({ ...audioChunks, [episodeId]: [...episodeChunks] });
+      nextAudioChunks = { ...nextAudioChunks, [episodeId]: [...episodeChunks] };
+      onAudioChunksChange(nextAudioChunks);
       await new Promise(resolve => setTimeout(resolve, 800));
     }
+    return nextAudioChunks;
   };
 
   const handleSynthesizeAll = async () => {
@@ -101,7 +109,7 @@ export const TextToSpeech: React.FC<Props> = ({
     setSynthesizing(true);
     setError(null);
     try {
-      await synthesizeEpisode(activeStory.id, currentScript, currentAnalyzedScript);
+      await synthesizeEpisode(activeStory.id, currentScript, currentAnalyzedScript, audioChunks);
     } catch (e: unknown) {
       setError(asUiError(e, 'Synthesis failed.'));
     } finally {
@@ -115,6 +123,7 @@ export const TextToSpeech: React.FC<Props> = ({
     setError(null);
     try {
       const nextAnalyzedScripts: Record<string, AIAnalyzedScript | null> = { ...analyzedScripts };
+      let nextAudioChunks: Record<string, SynthesizedChunk[]> = { ...audioChunks };
       for (const ep of selectedEpisodes) {
         const script = editableScripts[ep.id] || scripts[ep.id];
         if (!script) continue;
@@ -127,7 +136,7 @@ export const TextToSpeech: React.FC<Props> = ({
           onAnalyzedScriptsChange(nextAnalyzedScripts);
         }
         
-        await synthesizeEpisode(ep.id, script, analyzed);
+        nextAudioChunks = await synthesizeEpisode(ep.id, script, analyzed, nextAudioChunks);
       }
     } catch (e: unknown) {
       setError(asUiError(e, 'Batch synthesis failed.'));
