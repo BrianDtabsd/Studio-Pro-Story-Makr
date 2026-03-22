@@ -5,41 +5,6 @@ import { ActionButton } from '../common/ActionButton.tsx';
 import { computeProjectProgress, getWorkflowStats } from '../../projectProgress.ts';
 import { uploadAvatarAsset } from '../../services/storageService.ts';
 
-// ── Mascot ────────────────────────────────────────────────────────────────────
-// "Mak" — minimal SVG face, three expressions.
-const Mak = ({
-  size = 48,
-  expression = 'smile',
-}: {
-  size?: number;
-  expression?: 'smile' | 'think' | 'wow';
-}) => (
-  <svg width={size} height={size} viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <circle cx="30" cy="30" r="28" fill="#16172a" stroke="#ffad66" strokeWidth="1.5" />
-    {expression === 'think' ? (
-      <>
-        <circle cx="22" cy="27" r="2.5" fill="#ffad66" />
-        <circle cx="38" cy="27" r="2.5" fill="#ffad66" />
-        <path d="M23 37 Q30 34 37 37" stroke="#ffad66" strokeWidth="1.8" strokeLinecap="round" />
-        <circle cx="44" cy="16" r="2" fill="#ffad66" opacity="0.45" />
-        <circle cx="50" cy="10" r="1.3" fill="#ffad66" opacity="0.25" />
-      </>
-    ) : expression === 'wow' ? (
-      <>
-        <ellipse cx="22" cy="27" rx="3" ry="3.5" fill="#ffad66" />
-        <ellipse cx="38" cy="27" rx="3" ry="3.5" fill="#ffad66" />
-        <ellipse cx="30" cy="38" rx="4" ry="4.5" stroke="#ffad66" strokeWidth="1.5" />
-      </>
-    ) : (
-      <>
-        <circle cx="22" cy="27" r="2.5" fill="#ffad66" />
-        <circle cx="38" cy="27" r="2.5" fill="#ffad66" />
-        <path d="M20 36 Q30 44 40 36" stroke="#ffad66" strokeWidth="1.8" strokeLinecap="round" />
-      </>
-    )}
-  </svg>
-);
-
 // ── Avatar presets — 10 color schemes using the Mak face ─────────────────────
 const PRESETS = [
   { bg: '#1e1f2e', accent: '#ffad66' },
@@ -95,34 +60,6 @@ const AvatarDisplay = ({ profile, size }: { profile: UserProfile; size: number }
     </div>
   );
 };
-
-// ── Guide steps ───────────────────────────────────────────────────────────────
-const STEPS: { num: string; label: string; expression: 'smile' | 'think' | 'wow'; speech: string }[] = [
-  {
-    num: '01', label: '1. Settings', expression: 'think',
-    speech: 'Start here. Give me keywords, a genre, and a tone. I\'ll generate a set of story concepts for you to pick from.',
-  },
-  {
-    num: '02', label: '2. Script', expression: 'smile',
-    speech: 'Pick a concept and I\'ll write a full script. Single narrator, two voices, or a full cast — you set the format.',
-  },
-  {
-    num: '03', label: '3. Voice', expression: 'smile',
-    speech: 'Select a voice and I\'ll narrate every line. Edit the script first if you need to, then generate.',
-  },
-  {
-    num: '04', label: '4. Visuals', expression: 'wow',
-    speech: 'I\'ll create a scene image for every major moment. Set the visual style once and it carries through.',
-  },
-  {
-    num: '05', label: 'Cover', expression: 'smile',
-    speech: 'Generate a thumbnail for the project. It shows on your project card and inside your export.',
-  },
-  {
-    num: '06', label: 'Export', expression: 'smile',
-    speech: 'When you\'re done, download everything as a ZIP — script, audio files, images. Packaged and ready.',
-  },
-];
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 interface ProfileManagerProps {
@@ -187,7 +124,7 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({
   }
 
   // ── Signed-in state ─────────────────────────────────────────────────────────
-  const [tab, setTab] = useState<'projects' | 'guide' | 'account'>('projects');
+  const [tab, setTab] = useState<'projects' | 'account'>('projects');
   const [username, setUsername] = useState(currentUser.username ?? '');
   const [bio, setBio] = useState(currentUser.bio ?? '');
   const [avatarChoice, setAvatarChoice] = useState(currentUser.avatarChoice ?? 'initials');
@@ -302,12 +239,6 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({
           Projects
         </button>
         <button
-          onClick={() => setTab('guide')}
-          className={`neu-btn px-4 py-2 text-xs font-black uppercase tracking-widest ${tab === 'guide' ? 'text-accent-orange border border-accent-orange/30' : 'text-neu-text'}`}
-        >
-          Guide
-        </button>
-        <button
           onClick={() => setTab('account')}
           className={`neu-btn px-4 py-2 text-xs font-black uppercase tracking-widest ${tab === 'account' ? 'text-accent-orange border border-accent-orange/30' : 'text-neu-text'}`}
         >
@@ -367,26 +298,6 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({
               })}
             </div>
           )}
-        </div>
-      )}
-
-      {/* ══ How It Works tab ═══════════════════════════════════════════════════ */}
-      {tab === 'guide' && (
-        <div className="space-y-4 max-w-2xl">
-          {STEPS.map(step => (
-            <div key={step.num} className="neu-flat rounded-2xl p-6 flex gap-5 items-start">
-              <div className="flex-shrink-0 flex flex-col items-center gap-1.5">
-                <Mak expression={step.expression} size={44} />
-                <span className="text-[9px] font-black text-accent-orange uppercase tracking-widest">{step.num}</span>
-              </div>
-              <div className="flex-grow min-w-0">
-                <h4 className="text-xs font-black text-neu-text-dark uppercase tracking-widest mb-3">{step.label}</h4>
-                <div className="neu-pressed rounded-xl rounded-tl-sm p-4">
-                  <p className="text-sm text-neu-text leading-relaxed">"{step.speech}"</p>
-                </div>
-              </div>
-            </div>
-          ))}
         </div>
       )}
 

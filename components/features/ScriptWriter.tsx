@@ -104,23 +104,33 @@ export const ScriptWriter: React.FC<ScriptWriterProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(selectedEpisodes[0]?.id || story?.id || null);
+  const [editorOpenForId, setEditorOpenForId] = useState<string | null>(null);
+  const [editorDrafts, setEditorDrafts] = useState<Record<string, string>>({});
+
+  const orderedEpisodes = [...selectedEpisodes].sort(
+    (a, b) => (a.episodeNumber ?? Number.MAX_SAFE_INTEGER) - (b.episodeNumber ?? Number.MAX_SAFE_INTEGER)
+  );
 
   const activeStory =
-    selectedEpisodes.find((e) => e.id === activeEpisodeId) ||
-    selectedEpisodes[0] ||
+    orderedEpisodes.find((e) => e.id === activeEpisodeId) ||
+    orderedEpisodes[0] ||
     story;
   const currentOutline = activeStory ? (outlines[activeStory.id] || '') : '';
   const currentScript = activeStory ? (scripts[activeStory.id] || '') : '';
+  const activeStoryId = activeStory?.id || '';
+  const activeDuration = resolveDurationWindow(activeStory);
+  const firstPendingEpisode = orderedEpisodes.find((episode) => !scripts[episode.id]?.trim());
+  const activeDraft = activeStory ? (editorDrafts[activeStory.id] ?? '') : '';
 
   useEffect(() => {
     setActiveEpisodeId((prev) => {
-      if (selectedEpisodes.length > 0) {
-        if (prev && selectedEpisodes.some((episode) => episode.id === prev)) return prev;
-        return selectedEpisodes[0].id;
+      if (orderedEpisodes.length > 0) {
+        if (prev && orderedEpisodes.some((episode) => episode.id === prev)) return prev;
+        return orderedEpisodes[0].id;
       }
       return story?.id || null;
     });
-  }, [selectedEpisodes, story?.id]);
+  }, [orderedEpisodes, story?.id]);
 
   const handleGenerateFullScript = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -159,78 +169,104 @@ export const ScriptWriter: React.FC<ScriptWriterProps> = ({
     }
   };
 
+  const handleSendToEditor = () => {
+    if (!activeStory || !currentScript.trim()) return;
+    setEditorDrafts((prev) => ({ ...prev, [activeStory.id]: currentScript }));
+    setEditorOpenForId(activeStory.id);
+  };
+
+  const handleAcceptEdit = () => {
+    if (!activeStory) return;
+    const draft = (editorDrafts[activeStory.id] || '').trim();
+    if (!draft) {
+      setError('Edited script cannot be empty.');
+      return;
+    }
+    onScriptsChange({ ...scripts, [activeStory.id]: editorDrafts[activeStory.id] });
+    setEditorOpenForId(null);
+  };
+
+  const handleCancelEdit = () => {
+    setEditorOpenForId(null);
+  };
+
   if (!story) return <SectionCard title="Script Architect"><p className="text-neu-text italic">Matrix empty. Select a narrative node first.</p></SectionCard>;
   
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-      {/* Sidebar for Episodes */}
-      {selectedEpisodes.length > 0 && (
-        <section className="lg:col-span-3 space-y-4">
-          <h3 className="text-sm font-bold text-neu-text-dark uppercase px-2">Episodes</h3>
-          <div className="space-y-3">
-            {selectedEpisodes.map(ep => (
-              <div 
-                key={ep.id}
-                onClick={() => setActiveEpisodeId(ep.id)}
-                className={`p-4 rounded-xl cursor-pointer transition-all ${activeEpisodeId === ep.id ? 'neu-pressed border-l-4 border-accent-orange' : 'neu-flat hover:scale-[1.02]'}`}
-              >
-                <h4 className="text-xs font-bold text-neu-text-dark line-clamp-1">{ep.title}</h4>
-                <div className="flex items-center gap-2 mt-1">
-                  {scripts[ep.id] ? (
-                    <span className="text-[9px] font-bold text-green-500 uppercase">Script Ready</span>
-                  ) : (
-                    <span className="text-[9px] font-bold text-neu-text uppercase">No Script</span>
-                  )}
-                </div>
-              </div>
-            ))}
+      <aside className="lg:col-span-3 space-y-4">
+        <SectionCard title="Selected Story Context">
+          <div className="space-y-4">
+            <div className="neu-pressed p-4 rounded-2xl">
+              <p className="text-[10px] font-bold text-accent-orange uppercase tracking-widest mb-2">
+                {activeStory?.episodeNumber ? `Episode ${activeStory.episodeNumber}` : 'Active Story'}
+              </p>
+              <h3 className="text-sm font-black text-neu-text-dark uppercase">{activeStory?.title}</h3>
+              <p className="text-xs text-neu-text mt-2 leading-relaxed">{activeStory?.description}</p>
+            </div>
+            <div className="neu-pressed p-4 rounded-2xl">
+              <h4 className="text-[10px] font-black text-neu-text-dark uppercase tracking-widest mb-2">
+                Script Contract Snapshot
+              </h4>
+              <ul className="space-y-1 text-[11px] text-neu-text">
+                <li>Runtime target: {activeDuration.min}-{activeDuration.max} minutes</li>
+                <li>Narrator + dialogue + SFX cues required</li>
+                <li>Stage directions + visual beat prompts required</li>
+              </ul>
+            </div>
+            <div className="neu-pressed p-4 rounded-2xl">
+              <h4 className="text-[10px] font-black text-neu-text-dark uppercase tracking-widest mb-2">
+                Completion Criteria
+              </h4>
+              <ul className="space-y-1 text-[11px] text-neu-text">
+                <li>{currentOutline.trim() ? '✓' : '○'} Outline is drafted</li>
+                <li>{currentScript.trim() ? '✓' : '○'} Script is generated</li>
+                <li>{activeDraft.trim() ? '✓' : '○'} Edited draft prepared (optional)</li>
+              </ul>
+            </div>
           </div>
-          {selectedEpisodes.length > 1 && (
-            <button 
-              onClick={handleBatchGenerate}
-              disabled={loading}
-              className="w-full neu-btn py-3 text-xs font-bold uppercase text-accent-orange mt-4"
-            >
-              Batch Generate All
-            </button>
-          )}
-        </section>
-      )}
+        </SectionCard>
+      </aside>
 
-      <section className={`${selectedEpisodes.length > 0 ? 'lg:col-span-9' : 'lg:col-span-12'}`}>
-        <SectionCard title="Script Architect">
-          <div className="mb-10 p-6 neu-pressed rounded-2xl relative">
-            <h3 className="text-xs font-bold text-accent-orange uppercase tracking-widest mb-3">
-              {activeStory?.isSeriesConcept ? 'Series Concept' : `Episode ${activeStory?.episodeNumber || ''}`}
-            </h3>
-            <h4 className="text-xl font-black text-neu-text-dark uppercase mb-2">{activeStory?.title}</h4>
-            <p className="text-sm text-neu-text leading-relaxed max-w-2xl">{activeStory?.description}</p>
+      <section className="lg:col-span-6">
+        <SectionCard title="Outline & Script Workspace">
+          <div className="flex items-center gap-2 mb-6 px-1">
+            <ScriptIcon />
+            <span className="text-xs font-black text-neu-text-dark uppercase tracking-widest">
+              Active Workspace
+            </span>
           </div>
 
-          <form onSubmit={handleGenerateFullScript} className="space-y-10">
-            <TextAreaInput 
-              label="Structural Outline (Editable)" 
-              value={currentOutline} 
-              onChange={(e) => onOutlinesChange({ ...outlines, [activeStory!.id]: e.target.value })} 
-              rows={12} 
-              className="font-mono text-xs" 
-              placeholder="The AI will expand this into a full script..." 
+          <form onSubmit={handleGenerateFullScript} className="space-y-8">
+            <TextAreaInput
+              label="Structural Outline (Editable)"
+              value={currentOutline}
+              onChange={(e) => onOutlinesChange({ ...outlines, [activeStory!.id]: e.target.value })}
+              rows={12}
+              className="font-mono text-xs"
+              placeholder="The AI will expand this into a full script..."
             />
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-end">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
               <div>
-                <label htmlFor="script-type-select" className="block text-sm font-bold text-neu-text-dark mb-3">Narrative Style</label>
-                <select id="script-type-select" aria-label="Narrative Style" value={initialScriptType} onChange={(e) => onScriptTypeChange(e.target.value as ScriptType)} className="w-full neu-pressed text-neu-text-dark rounded-xl p-4 text-sm focus:outline-none focus:ring-0">
+                <label htmlFor="script-type-select" className="block text-sm font-bold text-neu-text-dark mb-3">
+                  Narrative Style
+                </label>
+                <select
+                  id="script-type-select"
+                  aria-label="Narrative Style"
+                  value={initialScriptType}
+                  onChange={(e) => onScriptTypeChange(e.target.value as ScriptType)}
+                  className="w-full neu-pressed text-neu-text-dark rounded-xl p-4 text-sm focus:outline-none focus:ring-0"
+                >
                   <option value={ScriptType.SingleVoice}>One Person Talking</option>
                   <option value={ScriptType.TwoVoice}>Two Person Dialogue</option>
                   <option value={ScriptType.MultiVoice}>Full Cinematic Cast</option>
                 </select>
               </div>
-              <div className="flex gap-4">
-                  <ActionButton type="submit" isLoading={loading} className="flex-1 py-5 h-[56px]">
-                    {currentScript ? 'RE-SYNTHESIZE SCRIPT' : 'SYNTHESIZE SCRIPT'}
-                  </ActionButton>
-              </div>
+              <ActionButton type="submit" isLoading={loading} className="py-5 h-[56px]">
+                {currentScript ? 'RE-SYNTHESIZE SCRIPT' : 'SYNTHESIZE SCRIPT'}
+              </ActionButton>
             </div>
           </form>
 
@@ -238,19 +274,109 @@ export const ScriptWriter: React.FC<ScriptWriterProps> = ({
           {loading && !currentScript && <LoadingSpinner text="Splicing narrative threads..." />}
 
           {currentScript && (
-            <div className="mt-16 animate-in fade-in slide-in-from-bottom-4">
-              <div className="flex justify-between items-center mb-6 px-2">
+            <div className="mt-10 animate-in fade-in slide-in-from-bottom-4 space-y-4">
+              <div className="flex justify-between items-center">
                 <h3 className="text-sm font-bold text-neu-text-dark uppercase">Final Synthetic Script</h3>
                 <CopyButton textToCopy={currentScript} className="neu-btn" />
               </div>
-              <div className="neu-pressed p-8 rounded-3xl relative overflow-hidden">
-                <pre className="text-neu-text-dark whitespace-pre-wrap break-words font-mono text-sm leading-relaxed max-h-[600px] overflow-y-auto custom-scrollbar relative z-10">{currentScript}</pre>
+              <div className="neu-pressed p-6 rounded-3xl relative overflow-hidden">
+                <pre className="text-neu-text-dark whitespace-pre-wrap break-words font-mono text-sm leading-relaxed max-h-[520px] overflow-y-auto custom-scrollbar relative z-10">
+                  {currentScript}
+                </pre>
               </div>
-              <ActionButton onClick={onNavigateToNextStep} className="w-full mt-10 py-6 text-lg">PROCEED TO VOICE ENGINE</ActionButton>
+
+              <div className="flex flex-wrap gap-3">
+                <ActionButton type="button" onClick={handleSendToEditor} className="px-5 py-3 text-xs">
+                  Send to Editor
+                </ActionButton>
+                <ActionButton type="button" onClick={onNavigateToNextStep} className="px-5 py-3 text-xs bg-accent-orange text-white">
+                  Proceed to Voice Engine
+                </ActionButton>
+              </div>
+            </div>
+          )}
+
+          {editorOpenForId === activeStory?.id && (
+            <div className="mt-6 neu-pressed p-5 rounded-2xl space-y-4">
+              <h4 className="text-xs font-black text-neu-text-dark uppercase tracking-widest">
+                Script Editor
+              </h4>
+              <textarea
+                value={activeDraft}
+                onChange={(e) =>
+                  setEditorDrafts((prev) => ({ ...prev, [activeStoryId]: e.target.value }))
+                }
+                rows={12}
+                className="w-full neu-flat rounded-xl p-4 text-sm font-mono text-neu-text-dark focus:outline-none resize-y"
+              />
+              <div className="flex gap-3">
+                <ActionButton type="button" onClick={handleAcceptEdit} className="px-4 py-2 text-xs">
+                  Accept Edit
+                </ActionButton>
+                <button type="button" onClick={handleCancelEdit} className="neu-btn px-4 py-2 text-xs font-bold uppercase text-neu-text">
+                  Cancel
+                </button>
+              </div>
             </div>
           )}
         </SectionCard>
       </section>
+
+      <aside className="lg:col-span-3">
+        <SectionCard title="Ordered Episodes">
+          {orderedEpisodes.length > 0 ? (
+            <div className="space-y-3">
+              {orderedEpisodes.map((episode) => (
+                <button
+                  key={episode.id}
+                  onClick={() => setActiveEpisodeId(episode.id)}
+                  className={`w-full text-left p-4 rounded-xl transition-all ${
+                    activeEpisodeId === episode.id
+                      ? 'neu-pressed border-l-4 border-accent-orange'
+                      : 'neu-flat hover:scale-[1.02]'
+                  }`}
+                >
+                  <p className="text-[9px] font-black text-accent-orange uppercase tracking-widest mb-1">
+                    {episode.episodeNumber ? `Episode ${episode.episodeNumber}` : 'Episode'}
+                  </p>
+                  <h4 className="text-xs font-bold text-neu-text-dark line-clamp-1">{episode.title}</h4>
+                  <p className="text-[10px] text-neu-text mt-1 uppercase font-bold">
+                    {scripts[episode.id] ? 'Script Ready' : 'Pending Script'}
+                  </p>
+                </button>
+              ))}
+
+              <div className="pt-2 flex flex-col gap-2">
+                {firstPendingEpisode && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveEpisodeId(firstPendingEpisode.id)}
+                    className="neu-btn w-full py-2 text-[10px] font-black uppercase tracking-widest text-neu-text-dark"
+                  >
+                    Return to Next Pending
+                  </button>
+                )}
+                {orderedEpisodes.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={handleBatchGenerate}
+                    disabled={loading}
+                    className="neu-btn w-full py-3 text-xs font-bold uppercase text-accent-orange"
+                  >
+                    Batch Generate All
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="neu-pressed p-4 rounded-2xl">
+              <p className="text-xs text-neu-text">
+                Single-story mode active. The current story stays selected until you return to Settings.
+              </p>
+            </div>
+          )}
+        </SectionCard>
+      </aside>
     </div>
   );
 };
