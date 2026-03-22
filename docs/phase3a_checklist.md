@@ -23,9 +23,10 @@
 
 ## Milestone 3 — Audio all-at-once completion
 
-- [ ] One flow that synthesizes, plays in-app, downloads, saves compiled master, and retains per-scene clips.
-- [ ] Progress + retry + failure messaging for full audio completion path.
-- [ ] Default narrator/unassigned voice resolves to male.
+- [x] Start all-at-once audio path with compiled master retention + per-scene clips preserved.
+- [x] Add progress + retry + failure messaging in voice workflow.
+- [ ] Fully validate end-to-end compiled-master save/export behavior in manual walkthrough.
+- [x] Default narrator/unassigned voice resolves to male.
 - [ ] Runtime docs/probe evidence for any model capability claims.
 
 ## Evidence and handoff

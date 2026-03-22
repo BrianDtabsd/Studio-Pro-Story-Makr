@@ -238,6 +238,7 @@ export interface SynthesizedChunk {
   audioDataUrl: string; 
   sceneNumbers: number[];
   downloadFilename: string;
+  kind?: 'scene' | 'compiled_master';
 }
 
 export interface TitleCardData {
