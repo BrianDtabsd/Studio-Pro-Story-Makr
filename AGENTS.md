@@ -51,3 +51,30 @@ Interpretation:
 - One issue at a time.
 - No opportunistic refactors during incident fixes.
 - If a fix requires broader refactor, pause and ask for explicit approval.
+
+## Cursor Cloud specific instructions
+
+### Project overview
+Story Makr is a React 19 + TypeScript SPA built with Vite. It is a frontend-only repository; all backend services (Firebase Auth, Firestore, Cloud Functions, Storage) are hosted remotely on the `chronos-video-forensics` Firebase project. No Docker, no local backend, no Firebase emulators.
+
+### Running the app
+- `npm run dev` — starts Vite dev server on port 3000 (binds `0.0.0.0`).
+- The app requires Google Sign-In via Firebase Auth. Without a valid OAuth domain, sign-in will not work in sandboxed/cloud environments.
+
+### Lint / Build / Test
+- `npm run lint` — runs `tsc --noEmit` (TypeScript type-check only; no ESLint configured).
+- `npm run build` — runs `vite build` (production bundle).
+- There are no automated tests or test framework configured in this project.
+
+### Pre-existing code issues (as of March 2026)
+- `App.tsx` has duplicate `const` declarations (e.g. `createDefaultProSettings` appears twice), which cause both `npm run build` and the Vite dev server overlay to fail with "identifier already declared" errors.
+- `components/features/ProfileManager.tsx` has a JSX syntax error at line 337.
+- These must be fixed before the app renders or builds successfully.
+
+### CLI tools available
+- **Firebase CLI** (`firebase`) — installed globally via npm. Use for `firebase deploy`, `firebase emulators`, etc.
+- **Google Cloud CLI** (`gcloud`) — installed at `/opt/google-cloud-sdk/`. PATH is configured via `/etc/profile.d/gcloud.sh` and `~/.bashrc`. If `gcloud` is not found in a non-interactive shell, run `export PATH="/opt/google-cloud-sdk/bin:$PATH"`.
+
+### Environment variables
+- `GEMINI_API_KEY` must be set in `.env.local` (required for AI features).
+- See `README.md` § "Production reliability checklist" for optional keys (`VITE_STRIPE_PUBLISHABLE_KEY`, etc.).
