@@ -29,6 +29,22 @@ export const TextToSpeech: React.FC<Props> = ({
   defaultVoiceKey, onDefaultVoiceKeyChange, characterVoicePresets, analyzedScripts, onAnalyzedScriptsChange,
   audioChunks, onAudioChunksChange, onNavigateToNextStep
 }) => {
+  const asUiError = (error: unknown, prefix: string): string => {
+    if (error instanceof Error && error.message.trim().length > 0) {
+      return `${prefix} ${error.message}`;
+    }
+    if (typeof error === 'string' && error.trim().length > 0) {
+      return `${prefix} ${error}`;
+    }
+    try {
+      const asJson = JSON.stringify(error);
+      if (asJson && asJson !== '{}') return `${prefix} ${asJson}`;
+    } catch {
+      // ignore JSON serialization errors
+    }
+    return prefix;
+  };
+
   const [loading, setLoading] = useState(false);
   const [synthesizing, setSynthesizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,8 +70,8 @@ export const TextToSpeech: React.FC<Props> = ({
       const chars = activeStory.proSettingsUsed?.characters || [];
       const result = await analyzeScript(currentScript, chars);
       onAnalyzedScriptsChange({ ...analyzedScripts, [activeStory.id]: result });
-    } catch (e: any) {
-      setError("Script analysis failed. Check your script format.");
+    } catch (e: unknown) {
+      setError(asUiError(e, 'Script analysis failed.'));
     } finally {
       setLoading(false);
     }
@@ -86,8 +102,8 @@ export const TextToSpeech: React.FC<Props> = ({
     setError(null);
     try {
       await synthesizeEpisode(activeStory.id, currentScript, currentAnalyzedScript);
-    } catch (e: any) {
-      setError("Synthesis failed.");
+    } catch (e: unknown) {
+      setError(asUiError(e, 'Synthesis failed.'));
     } finally {
       setSynthesizing(false);
     }
@@ -113,8 +129,8 @@ export const TextToSpeech: React.FC<Props> = ({
         
         await synthesizeEpisode(ep.id, script, analyzed);
       }
-    } catch (e: any) {
-      setError("Batch synthesis failed.");
+    } catch (e: unknown) {
+      setError(asUiError(e, 'Batch synthesis failed.'));
     } finally {
       setSynthesizing(false);
     }
@@ -257,8 +273,8 @@ export const TextToSpeech: React.FC<Props> = ({
               <div className="neu-pressed p-6 rounded-2xl space-y-8">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div>
-                        <label className="text-sm font-bold text-neu-text-dark mb-3 block">Main Narrator Voice</label>
-                        <select className="w-full neu-pressed text-neu-text-dark p-4 rounded-xl text-sm focus:outline-none focus:ring-0" value={defaultVoiceKey} onChange={e => onDefaultVoiceKeyChange(e.target.value as PresetVoiceKey)}>
+                        <label htmlFor="defaultVoiceKeySelect" className="text-sm font-bold text-neu-text-dark mb-3 block">Main Narrator Voice</label>
+                        <select id="defaultVoiceKeySelect" className="w-full neu-pressed text-neu-text-dark p-4 rounded-xl text-sm focus:outline-none focus:ring-0" value={defaultVoiceKey} onChange={e => onDefaultVoiceKeyChange(e.target.value as PresetVoiceKey)}>
                             {PRESET_VOICE_KEYS_ORDERED.map(k => <option key={k} value={k}>{PRESET_VOICES_CONFIG[k].displayName}</option>)}
                         </select>
                     </div>

@@ -89,7 +89,12 @@ export const ThumbnailMaker: React.FC<{
                 )}
                 {initialThumbnail ? (
                     <div className="group relative w-full h-full">
-                        <img src={initialThumbnail.src} className="w-full h-full object-cover" />
+                        <img
+                            src={initialThumbnail.src}
+                            alt={initialThumbnail.prompt || `Thumbnail for ${storyIdeaForTitle?.title || 'generated image'}`}
+                            title={initialThumbnail.prompt || storyIdeaForTitle?.title || 'Generated thumbnail'}
+                            className="w-full h-full object-cover"
+                        />
                         <div className="absolute inset-0 bg-neu-base/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-4">
                             <DownloadButton fileUrl={initialThumbnail.src} fileName="thumbnail_master.jpg" buttonText="SAVE MASTER" className="neu-btn text-accent-orange font-bold" />
                         </div>

@@ -22,6 +22,9 @@ export enum ProductionProtocol {
 export interface UserProfile {
   username: string;
   avatarSeed: string;
+  avatarChoice?: string; // 'initials' | 'preset-0'..'preset-9' | https:// Storage URL
+  bio?: string;
+  defaultContentStyle?: ContentStyle;
   joinedDate: number;
   isPro?: boolean;
 }
