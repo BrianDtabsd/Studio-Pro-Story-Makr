@@ -29,6 +29,22 @@ export const SceneImageManager: React.FC<Props> = ({
   globalImageStylePrompt, onGlobalImageStylePromptChange, onNavigateToNextStep, 
   analyzedScripts, onAnalyzedScriptsChange 
 }) => {
+  const asUiError = (error: unknown, prefix: string): string => {
+    if (error instanceof Error && error.message.trim().length > 0) {
+      return `${prefix} ${error.message}`;
+    }
+    if (typeof error === 'string' && error.trim().length > 0) {
+      return `${prefix} ${error}`;
+    }
+    try {
+      const asJson = JSON.stringify(error);
+      if (asJson && asJson !== '{}') return `${prefix} ${asJson}`;
+    } catch {
+      // ignore JSON serialization errors
+    }
+    return prefix;
+  };
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(selectedEpisodes[0]?.id || story?.id || null);
@@ -65,6 +81,18 @@ export const SceneImageManager: React.FC<Props> = ({
     });
   }, [selectedEpisodes, story?.id]);
 
+  // Safety reset: if a project is reopened after abandoning generation, clear stale
+  // in-progress flags so the UI never remains in a permanent spinner state.
+  useEffect(() => {
+    if (!activeStory) return;
+    if (!currentDefs.some((def) => def.isGenerating)) return;
+    const resetDefs = currentDefs.map((def) => ({ ...def, isGenerating: false }));
+    onSceneImageDefinitionsChange({
+      ...sceneImageDefinitions,
+      [activeStory.id]: resetDefs,
+    });
+  }, [activeStory, currentDefs, onSceneImageDefinitionsChange, sceneImageDefinitions]);
+
   const handleAnalyze = async () => {
     if (!activeStory || !currentScript.trim()) return;
     setLoading(true);
@@ -84,8 +112,8 @@ export const SceneImageManager: React.FC<Props> = ({
         assetType: s.assetType || 'image'
       }));
       onSceneImageDefinitionsChange({ ...sceneImageDefinitions, [activeStory.id]: defs });
-    } catch (e: any) { 
-        setError("Script layout failed."); 
+    } catch (e: unknown) { 
+        setError(asUiError(e, 'Script layout failed.'));
     } finally { 
         setLoading(false); 
     }
@@ -118,8 +146,8 @@ export const SceneImageManager: React.FC<Props> = ({
         );
         updateDef(sceneNum, { generatedVideoUrl: url, isGenerating: false, generationError: undefined });
       }
-    } catch (e: any) { 
-      const message = e instanceof Error ? e.message : 'Generation failed. Please retry.';
+    } catch (e: unknown) { 
+      const message = asUiError(e, 'Generation failed. Please retry.');
       updateDef(sceneNum, { isGenerating: false, generationError: message });
     }
   };
