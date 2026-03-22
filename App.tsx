@@ -462,7 +462,8 @@ const AppContent: React.FC = () => {
   const scenePlansReadyForTargets = hasSelectedStory && workflowTargetIds.every(
     (id) => (projectState.simg_sceneImageDefinitions[id] || []).length > 0
   );
-  const hasAnyVisualOutput = Object.values(projectState.simg_sceneImageDefinitions).some((scenes) =>
+  const allSceneDefinitions = Object.values(projectState.simg_sceneImageDefinitions) as SceneImageDefinition[][];
+  const hasAnyVisualOutput = allSceneDefinitions.some((scenes) =>
     scenes.some((scene) => !!scene.generatedImageUrl || !!scene.generatedVideoUrl)
   );
   const hasThumbnail = !!projectState.tm_generatedThumbnail?.src;
