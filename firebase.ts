@@ -22,7 +22,7 @@ export const auth = getAuth(app);
 export const db = appletConfig.firestoreDatabaseId
   ? getFirestore(app, appletConfig.firestoreDatabaseId)
   : getFirestore(app);
-export const functions = getFunctions(app);
+export const functions = getFunctions(app, 'us-central1');
 export const googleProvider = new GoogleAuthProvider();
 
 // Connection test

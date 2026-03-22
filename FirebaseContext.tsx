@@ -1,7 +1,15 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { auth, db, signInWithPopup, googleProvider, onAuthStateChanged, doc, getDoc, setDoc, collection, query, onSnapshot, deleteDoc, User } from './firebase';
+import { auth, signInWithPopup, googleProvider, onAuthStateChanged, getDoc, setDoc, query, onSnapshot, deleteDoc, User } from './firebase';
 import { UserProfile, Project } from './types';
 import { deleteProjectAssets } from './services/storageService';
+import {
+  toUserProfile,
+  toUserProfileDoc,
+  toUserProfileUpdate,
+  userProfileDocRef,
+  userProjectDocRef,
+  userProjectsCollectionRef,
+} from './services/firebaseCollections.ts';
 
 interface FirebaseContextType {
   user: User | null;
@@ -56,13 +64,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       setLoading(true);
       try {
-        const profileRef = doc(db, 'users', firebaseUser.uid);
+        const profileRef = userProfileDocRef(firebaseUser.uid);
         const userDoc = await getDoc(profileRef);
         if (eventId !== authEventId) return;
 
         if (userDoc.exists()) {
-          const data = userDoc.data();
-          setProfile({ ...data, isPro: data.plan === 'pro' } as UserProfile);
+          setProfile(toUserProfile(userDoc.data()));
         } else {
           const newProfile: UserProfile = {
             username: firebaseUser.displayName || 'Anonymous',
@@ -70,7 +77,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             joinedDate: Date.now(),
             isPro: false
           };
-          await setDoc(profileRef, newProfile);
+          await setDoc(profileRef, toUserProfileDoc(newProfile));
           if (eventId !== authEventId) return;
           setProfile(newProfile);
         }
@@ -79,17 +86,16 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         // the Stripe webhook writes plan: 'pro' to Firestore.
         unsubscribeProfile = onSnapshot(profileRef, (snap) => {
           if (snap.exists()) {
-            const data = snap.data();
-            setProfile({ ...data, isPro: data.plan === 'pro' } as UserProfile);
+            setProfile(toUserProfile(snap.data()));
           } else {
             setProfile(null);
           }
         });
 
         // Listen for projects
-        const q = query(collection(db, 'users', firebaseUser.uid, 'projects'));
+        const q = query(userProjectsCollectionRef(firebaseUser.uid));
         unsubscribeProjects = onSnapshot(q, (snapshot) => {
-          const projectList = snapshot.docs.map(doc => doc.data() as Project);
+          const projectList = snapshot.docs.map(projectDoc => projectDoc.data());
           setProjects(projectList.sort((a, b) => b.lastModified - a.lastModified));
         }, (error) => {
           console.error("Firestore Error (LIST projects):", error);
@@ -141,7 +147,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const saveProject = async (project: Project) => {
     if (!user) throw new Error('You must be signed in to save projects.');
     try {
-      await setDoc(doc(db, 'users', user.uid, 'projects', project.id), project);
+      await setDoc(userProjectDocRef(user.uid, project.id), project);
     } catch (error) {
       console.error("Firestore Error (SAVE project):", error);
       throw error;
@@ -153,7 +159,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       // Best-effort Storage cleanup — never blocks project deletion if it fails
       await deleteProjectAssets(user.uid, projectId).catch(() => {});
-      await deleteDoc(doc(db, 'users', user.uid, 'projects', projectId));
+      await deleteDoc(userProjectDocRef(user.uid, projectId));
     } catch (error) {
       console.error("Firestore Error (DELETE project):", error);
     }
@@ -162,7 +168,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const updateProfile = async (updates: Partial<UserProfile>) => {
     if (!user) return;
     try {
-      await setDoc(doc(db, 'users', user.uid), updates, { merge: true });
+      await setDoc(userProfileDocRef(user.uid), toUserProfileUpdate(updates), { merge: true });
       // onSnapshot listener on the user doc will pick up the change automatically.
     } catch (error) {
       console.error("Firestore Error (UPDATE profile):", error);
