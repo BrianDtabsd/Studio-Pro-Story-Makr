@@ -13,6 +13,7 @@ import { ProjectExport } from './components/features/ProjectExport.tsx';
 import { LandingPage } from './components/LandingPage.tsx';
 import CheckoutModal from './components/CheckoutModal';
 import { InfoBar } from './components/InfoBar.tsx';
+import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 import { FirebaseProvider, useFirebase } from './FirebaseContext';
 import { uploadImageAsset, uploadAudioAsset } from './services/storageService';
 import { computeProjectProgress } from './projectProgress.ts';
@@ -134,6 +135,12 @@ const AppContent: React.FC = () => {
   const [checkoutPriceId, setCheckoutPriceId] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const saveAttemptRef = useRef(0);
+  const sceneUploadRunRef = useRef(0);
+  const audioUploadRunRef = useRef(0);
+  const thumbnailUploadRunRef = useRef(0);
+
+  const getActiveProjectId = (state: ProjectState): string | undefined =>
+    state.projectId || state.storyForScripting?.id;
 
   // After sign-in: check for a pending checkout the user initiated from the landing page
   useEffect(() => {
@@ -326,9 +333,10 @@ const AppContent: React.FC = () => {
   // Optimistic: state updates instantly with base64 for UI, then updates again
   // with the permanent Storage URL once upload completes.
   const handleSceneImageDefinitionsChange = async (definitions: Record<string, SceneImageDefinition[]>) => {
+    const uploadRunId = ++sceneUploadRunRef.current;
+    const capturedProjectId = getActiveProjectId(projectState);
     setProjectState(prev => ({ ...prev, simg_sceneImageDefinitions: definitions }));
-    const projectId = projectState.projectId || projectState.storyForScripting?.id;
-    if (!user || !projectId) return;
+    if (!user || !capturedProjectId) return;
     const hasNewBase64 = Object.values(definitions).some(scenes =>
       scenes.some(s => s.generatedImageUrl?.startsWith('data:'))
     );
@@ -338,21 +346,32 @@ const AppContent: React.FC = () => {
       uploaded[ideaId] = await Promise.all(scenes.map(async scene => {
         if (scene.generatedImageUrl?.startsWith('data:')) {
           try {
-            const url = await uploadImageAsset(user.uid, projectId, `scene_${ideaId}_${scene.sceneNumber}`, scene.generatedImageUrl);
+            const url = await uploadImageAsset(user.uid, capturedProjectId, `scene_${ideaId}_${scene.sceneNumber}`, scene.generatedImageUrl);
             return { ...scene, generatedImageUrl: url };
           } catch { return scene; }
         }
         return scene;
       }));
     }
-    setProjectState(prev => ({ ...prev, simg_sceneImageDefinitions: uploaded }));
+    setProjectState((prev) => {
+      const currentProjectId = getActiveProjectId(prev);
+      if (
+        uploadRunId !== sceneUploadRunRef.current ||
+        !currentProjectId ||
+        currentProjectId !== capturedProjectId
+      ) {
+        return prev;
+      }
+      return { ...prev, simg_sceneImageDefinitions: uploaded };
+    });
   };
 
   // Upload audio chunks to Storage immediately after generation.
   const handleAudioChunksChange = async (chunks: Record<string, SynthesizedChunk[]>) => {
+    const uploadRunId = ++audioUploadRunRef.current;
+    const capturedProjectId = getActiveProjectId(projectState);
     setProjectState(prev => ({ ...prev, audioChunks: chunks }));
-    const projectId = projectState.projectId || projectState.storyForScripting?.id;
-    if (!user || !projectId) return;
+    if (!user || !capturedProjectId) return;
     const uploadCandidates = Object.entries(chunks).flatMap(([ideaId, list]) =>
       list
         .filter((chunk) => isLocalMediaUrl(chunk.audioDataUrl))
@@ -362,8 +381,16 @@ const AppContent: React.FC = () => {
 
     await Promise.all(uploadCandidates.map(async ({ ideaId, chunk }) => {
       try {
-        const url = await uploadAudioAssetWithRetry(user.uid, projectId, chunk.id, chunk.audioDataUrl);
+        const url = await uploadAudioAssetWithRetry(user.uid, capturedProjectId, chunk.id, chunk.audioDataUrl);
         setProjectState((prev) => {
+          const currentProjectId = getActiveProjectId(prev);
+          if (
+            uploadRunId !== audioUploadRunRef.current ||
+            !currentProjectId ||
+            currentProjectId !== capturedProjectId
+          ) {
+            return prev;
+          }
           const existing = prev.audioChunks[ideaId] || [];
           return {
             ...prev,
@@ -383,12 +410,23 @@ const AppContent: React.FC = () => {
 
   // Upload thumbnail to Storage immediately after generation.
   const handleThumbnailChange = async (thumbnail: GeneratedImage | null) => {
+    const uploadRunId = ++thumbnailUploadRunRef.current;
+    const capturedProjectId = getActiveProjectId(projectState);
     setProjectState(prev => ({ ...prev, tm_generatedThumbnail: thumbnail }));
-    const projectId = projectState.projectId || projectState.storyForScripting?.id;
-    if (!user || !projectId || !thumbnail?.src?.startsWith('data:')) return;
+    if (!user || !capturedProjectId || !thumbnail?.src?.startsWith('data:')) return;
     try {
-      const url = await uploadImageAsset(user.uid, projectId, 'thumbnail', thumbnail.src, 0.75);
-      setProjectState(prev => ({ ...prev, tm_generatedThumbnail: { ...thumbnail, src: url } }));
+      const url = await uploadImageAsset(user.uid, capturedProjectId, 'thumbnail', thumbnail.src, 0.75);
+      setProjectState((prev) => {
+        const currentProjectId = getActiveProjectId(prev);
+        if (
+          uploadRunId !== thumbnailUploadRunRef.current ||
+          !currentProjectId ||
+          currentProjectId !== capturedProjectId
+        ) {
+          return prev;
+        }
+        return { ...prev, tm_generatedThumbnail: { ...thumbnail, src: url } };
+      });
     } catch { /* keep base64 in memory, sanitizer strips it from Firestore */ }
   };
 
@@ -633,7 +671,9 @@ const AppContent: React.FC = () => {
 const App: React.FC = () => {
   return (
     <FirebaseProvider>
-      <AppContent />
+      <ErrorBoundary>
+        <AppContent />
+      </ErrorBoundary>
     </FirebaseProvider>
   );
 };
