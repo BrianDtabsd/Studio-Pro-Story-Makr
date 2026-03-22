@@ -71,6 +71,10 @@ Story Makr is a React 19 + TypeScript SPA built with Vite. It is a frontend-only
 - `components/features/ProfileManager.tsx` has a JSX syntax error at line 337.
 - These must be fixed before the app renders or builds successfully.
 
+### CLI tools available
+- **Firebase CLI** (`firebase`) — installed globally via npm. Use for `firebase deploy`, `firebase emulators`, etc.
+- **Google Cloud CLI** (`gcloud`) — installed at `/opt/google-cloud-sdk/`. PATH is configured via `/etc/profile.d/gcloud.sh` and `~/.bashrc`. If `gcloud` is not found in a non-interactive shell, run `export PATH="/opt/google-cloud-sdk/bin:$PATH"`.
+
 ### Environment variables
 - `GEMINI_API_KEY` must be set in `.env.local` (required for AI features).
 - See `README.md` § "Production reliability checklist" for optional keys (`VITE_STRIPE_PUBLISHABLE_KEY`, etc.).
