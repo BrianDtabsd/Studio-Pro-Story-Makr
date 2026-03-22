@@ -165,6 +165,8 @@ export interface ProStorySettings {
   incitingIncidentIdea: string; 
   productionProtocol: ProductionProtocol;
   videoBudget: number;
+  scriptDurationMinMinutes: number;
+  scriptDurationMaxMinutes: number;
   realisticImages: boolean;
   sourceFile?: { name: string; data: string; mimeType: string };
 }

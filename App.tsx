@@ -17,6 +17,7 @@ import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 import { FirebaseProvider, useFirebase } from './FirebaseContext';
 import { uploadImageAsset, uploadAudioAsset } from './services/storageService';
 import { computeProjectProgress } from './projectProgress.ts';
+import { DEFAULT_SCRIPT_DURATION_MAX_MINUTES, DEFAULT_SCRIPT_DURATION_MINUTES } from './constants.ts';
 
 const createDefaultProSettings = (): ProStorySettings => ({
   contentStyle: ContentStyle.Drama,
@@ -28,6 +29,8 @@ const createDefaultProSettings = (): ProStorySettings => ({
   incitingIncidentIdea: '',
   productionProtocol: ProductionProtocol.Cinematic,
   videoBudget: 3,
+  scriptDurationMinMinutes: DEFAULT_SCRIPT_DURATION_MINUTES,
+  scriptDurationMaxMinutes: DEFAULT_SCRIPT_DURATION_MAX_MINUTES,
   realisticImages: false
 });
 

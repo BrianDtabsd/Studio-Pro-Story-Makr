@@ -8,6 +8,12 @@ import { LoadingSpinner } from '../LoadingSpinner.tsx';
 import { ErrorDisplay } from '../ErrorDisplay.tsx';
 import { CopyButton } from '../common/CopyButton.tsx';
 import { StoryIdea, ScriptType } from '../../types.ts';
+import {
+  DEFAULT_SCRIPT_DURATION_MAX_MINUTES,
+  DEFAULT_SCRIPT_DURATION_MINUTES,
+  PRO_SCRIPT_DURATION_MAX_BOUND,
+  PRO_SCRIPT_DURATION_MIN_BOUND,
+} from '../../constants.ts';
 
 interface ScriptWriterProps {
   story: StoryIdea | null; 
@@ -26,6 +32,50 @@ const ScriptIcon = () => (
     <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
   </svg>
 );
+
+const clampRuntimeMinutes = (value: number): number =>
+  Math.max(PRO_SCRIPT_DURATION_MIN_BOUND, Math.min(PRO_SCRIPT_DURATION_MAX_BOUND, value));
+
+const resolveDurationWindow = (story?: StoryIdea | null): { min: number; max: number } => {
+  const settings = story?.proSettingsUsed;
+  const safeMin = clampRuntimeMinutes(
+    Number.isFinite(settings?.scriptDurationMinMinutes)
+      ? Number(settings?.scriptDurationMinMinutes)
+      : DEFAULT_SCRIPT_DURATION_MINUTES
+  );
+  const safeMax = clampRuntimeMinutes(
+    Number.isFinite(settings?.scriptDurationMaxMinutes)
+      ? Number(settings?.scriptDurationMaxMinutes)
+      : DEFAULT_SCRIPT_DURATION_MAX_MINUTES
+  );
+  return { min: Math.min(safeMin, safeMax), max: Math.max(safeMin, safeMax) };
+};
+
+const buildContractDrivenOutline = (outline: string, scriptType: ScriptType, story?: StoryIdea | null): string => {
+  const duration = resolveDurationWindow(story);
+  const settings = story?.proSettingsUsed;
+  const styleAnchors = [
+    `content style: ${settings?.contentStyle || 'Drama'}`,
+    `sub-genre: ${settings?.subGenre || 'general'}`,
+    `production tone: ${settings?.productionProtocol || 'Cinematic'}`,
+    `topic blend: ${settings?.topics?.length ? settings.topics.join(', ') : 'open'}`,
+  ].join(' | ');
+
+  return [
+    'SCRIPT OUTPUT CONTRACT (required):',
+    `- Runtime target: ${duration.min}-${duration.max} minutes.`,
+    `- Script mode: ${scriptType}.`,
+    '- Include narrator lines, dialogue exchanges, and explicit [SFX: ...] cues.',
+    '- Include [Stage Direction: ...] and [Scene Direction: ...] blocks before each major beat.',
+    '- Include [Visual Beat Prompt: ...] tied to each story milestone so scene generation is coherent.',
+    '- Keep milestone continuity explicit: setup, escalation, climax, and resolution must be traceable.',
+    '- Style blending is allowed and encouraged when coherent with the story brief.',
+    `- Style anchors: ${styleAnchors}.`,
+    '',
+    'SOURCE OUTLINE:',
+    outline.trim(),
+  ].join('\n');
+};
 
 export const ScriptWriter: React.FC<ScriptWriterProps> = ({ 
   story, 
@@ -79,7 +129,8 @@ export const ScriptWriter: React.FC<ScriptWriterProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const script = await generateScript(currentOutline || activeStory.description, initialScriptType, activeStory);
+      const scriptInput = buildContractDrivenOutline(currentOutline || activeStory.description, initialScriptType, activeStory);
+      const script = await generateScript(scriptInput, initialScriptType, activeStory);
       onScriptsChange({ ...scripts, [activeStory.id]: script }); 
     } catch (err: unknown) {
       setError(asUiError(err, 'Script synthesis failed.'));
@@ -96,7 +147,8 @@ export const ScriptWriter: React.FC<ScriptWriterProps> = ({
         const newScripts = { ...scripts };
         for (const ep of selectedEpisodes) {
             const outline = outlines[ep.id] || ep.description;
-            const script = await generateScript(outline, initialScriptType, ep);
+            const scriptInput = buildContractDrivenOutline(outline, initialScriptType, ep);
+            const script = await generateScript(scriptInput, initialScriptType, ep);
             newScripts[ep.id] = script;
         }
         onScriptsChange(newScripts);

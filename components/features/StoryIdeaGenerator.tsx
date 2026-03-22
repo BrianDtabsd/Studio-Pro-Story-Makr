@@ -6,7 +6,15 @@ import { TextAreaInput } from '../common/TextAreaInput.tsx';
 import { SectionCard } from '../SectionCard.tsx';
 import { LoadingSpinner } from '../LoadingSpinner.tsx';
 import { ErrorDisplay } from '../ErrorDisplay.tsx';
-import { STORY_IDEAS_PLACEHOLDER, PRESET_VOICE_KEYS_ORDERED, PRESET_VOICES_CONFIG } from '../../constants.ts';
+import {
+  STORY_IDEAS_PLACEHOLDER,
+  PRESET_VOICE_KEYS_ORDERED,
+  PRESET_VOICES_CONFIG,
+  DEFAULT_SCRIPT_DURATION_MAX_MINUTES,
+  DEFAULT_SCRIPT_DURATION_MINUTES,
+  PRO_SCRIPT_DURATION_MAX_BOUND,
+  PRO_SCRIPT_DURATION_MIN_BOUND,
+} from '../../constants.ts';
 import { StoryIdea, VIDEO_GENRES, VideoGenreId, ProStorySettings, STORY_SUB_GENRES, CharacterDefinition, CharacterVoicePreset, PresetVoiceKey, ContentStyle, PodcastFormat, StorySubGenreId } from '../../types.ts';
 
 interface Props {
@@ -26,6 +34,36 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
   onIdeasGenerated, onProceedToScripting, currentKeywords, currentIdeas, selectedIdeaIds, setSelectedIdeaIds,
   isProUser, proSettings, onProSettingsChange, onCharacterVoicePresetsChange
 }) => {
+  const clampDurationMinutes = (value: number): number =>
+    Math.max(PRO_SCRIPT_DURATION_MIN_BOUND, Math.min(PRO_SCRIPT_DURATION_MAX_BOUND, value));
+
+  const resolveDurationRange = (minValue: number | undefined, maxValue: number | undefined) => {
+    const safeMin = clampDurationMinutes(
+      Number.isFinite(minValue) ? Number(minValue) : DEFAULT_SCRIPT_DURATION_MINUTES
+    );
+    const safeMax = clampDurationMinutes(
+      Number.isFinite(maxValue) ? Number(maxValue) : DEFAULT_SCRIPT_DURATION_MAX_MINUTES
+    );
+    return {
+      min: Math.min(safeMin, safeMax),
+      max: Math.max(safeMin, safeMax),
+    };
+  };
+
+  const durationRange = resolveDurationRange(
+    proSettings.scriptDurationMinMinutes,
+    proSettings.scriptDurationMaxMinutes
+  );
+
+  const updateDurationRange = (nextMin: number, nextMax: number) => {
+    const resolved = resolveDurationRange(nextMin, nextMax);
+    onProSettingsChange((prev) => ({
+      ...prev,
+      scriptDurationMinMinutes: resolved.min,
+      scriptDurationMaxMinutes: resolved.max,
+    }));
+  };
+
   const [keywords, setKeywords] = useState(currentKeywords);
   const [targetAudience, setTargetAudience] = useState('Everyone');
   const [medium, setMedium] = useState('Live Action');
@@ -163,6 +201,63 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
               </button>
             ))}
           </div>
+        </div>
+
+        <div>
+          <h3 className="text-sm font-bold text-neu-text-dark mb-3">Target Script Duration</h3>
+          {isProUser ? (
+            <div className="neu-pressed p-4 rounded-xl space-y-3">
+              <p className="text-[10px] text-neu-text uppercase tracking-widest font-bold">
+                Pro Range: {PRO_SCRIPT_DURATION_MIN_BOUND}-{PRO_SCRIPT_DURATION_MAX_BOUND} minutes
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="text-[10px] font-bold text-neu-text-dark uppercase tracking-widest">
+                  Min
+                  <input
+                    type="number"
+                    min={PRO_SCRIPT_DURATION_MIN_BOUND}
+                    max={PRO_SCRIPT_DURATION_MAX_BOUND}
+                    value={durationRange.min}
+                    onChange={(e) => {
+                      const next = Number(e.target.value);
+                      if (Number.isFinite(next)) updateDurationRange(next, durationRange.max);
+                    }}
+                    className="mt-2 w-full neu-flat px-3 py-2 text-sm text-neu-text-dark focus:outline-none"
+                    aria-label="Minimum script duration in minutes"
+                    title="Minimum script duration in minutes"
+                  />
+                </label>
+                <label className="text-[10px] font-bold text-neu-text-dark uppercase tracking-widest">
+                  Max
+                  <input
+                    type="number"
+                    min={PRO_SCRIPT_DURATION_MIN_BOUND}
+                    max={PRO_SCRIPT_DURATION_MAX_BOUND}
+                    value={durationRange.max}
+                    onChange={(e) => {
+                      const next = Number(e.target.value);
+                      if (Number.isFinite(next)) updateDurationRange(durationRange.min, next);
+                    }}
+                    className="mt-2 w-full neu-flat px-3 py-2 text-sm text-neu-text-dark focus:outline-none"
+                    aria-label="Maximum script duration in minutes"
+                    title="Maximum script duration in minutes"
+                  />
+                </label>
+              </div>
+              <p className="text-[10px] text-neu-text">
+                Applied during script generation as a guidance target.
+              </p>
+            </div>
+          ) : (
+            <div className="neu-pressed p-4 rounded-xl">
+              <p className="text-xs font-bold text-neu-text-dark uppercase tracking-widest">
+                Default: {DEFAULT_SCRIPT_DURATION_MINUTES}-{DEFAULT_SCRIPT_DURATION_MAX_MINUTES} minutes
+              </p>
+              <p className="text-[10px] text-neu-text mt-2">
+                Upgrade to Pro to tune duration range.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Topics Dropdown */}
