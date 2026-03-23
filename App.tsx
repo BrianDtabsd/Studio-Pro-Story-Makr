@@ -17,6 +17,8 @@ import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 import { FirebaseProvider, useFirebase } from './FirebaseContext';
 import { uploadImageAsset, uploadAudioAsset } from './services/storageService';
 import { computeProjectProgress } from './projectProgress.ts';
+import { DEFAULT_SCRIPT_DURATION_MAX_MINUTES, DEFAULT_SCRIPT_DURATION_MINUTES } from './constants.ts';
+import { ContextualStepGuide, WorkflowCriterion, WorkflowGuideStep } from './components/workflow/ContextualStepGuide.tsx';
 
 const createDefaultProSettings = (): ProStorySettings => ({
   contentStyle: ContentStyle.Drama,
@@ -28,6 +30,8 @@ const createDefaultProSettings = (): ProStorySettings => ({
   incitingIncidentIdea: '',
   productionProtocol: ProductionProtocol.Cinematic,
   videoBudget: 3,
+  scriptDurationMinMinutes: DEFAULT_SCRIPT_DURATION_MINUTES,
+  scriptDurationMaxMinutes: DEFAULT_SCRIPT_DURATION_MAX_MINUTES,
   realisticImages: false
 });
 
@@ -437,6 +441,134 @@ const AppContent: React.FC = () => {
     setActiveView(ActiveView.StoryIdeas);
   };
 
+  const selectedEpisodes = projectState.generatedStoryIdeas.filter(
+    (idea) => projectState.selectedIdeaIds.includes(idea.id) && !idea.isSeriesConcept
+  );
+  const workflowTargetIds = selectedEpisodes.length > 0
+    ? selectedEpisodes.map((episode) => episode.id)
+    : projectState.storyForScripting?.id
+      ? [projectState.storyForScripting.id]
+      : [];
+  const hasSelectedStory = workflowTargetIds.length > 0;
+  const scriptsReadyForTargets = hasSelectedStory && workflowTargetIds.every(
+    (id) => (projectState.sw_generatedScripts[id] || '').trim().length > 0
+  );
+  const analyzedReadyForTargets = hasSelectedStory && workflowTargetIds.every(
+    (id) => !!projectState.analyzedScriptData[id]
+  );
+  const audioReadyForTargets = hasSelectedStory && workflowTargetIds.every(
+    (id) => (projectState.audioChunks[id] || []).length > 0
+  );
+  const scenePlansReadyForTargets = hasSelectedStory && workflowTargetIds.every(
+    (id) => (projectState.simg_sceneImageDefinitions[id] || []).length > 0
+  );
+  const allSceneDefinitions = Object.values(projectState.simg_sceneImageDefinitions) as SceneImageDefinition[][];
+  const hasAnyVisualOutput = allSceneDefinitions.some((scenes) =>
+    scenes.some((scene) => !!scene.generatedImageUrl || !!scene.generatedVideoUrl)
+  );
+  const hasThumbnail = !!projectState.tm_generatedThumbnail?.src;
+  const exportReady = scriptsReadyForTargets && (audioReadyForTargets || hasAnyVisualOutput);
+
+  const workflowSteps: WorkflowGuideStep[] = [
+    {
+      id: ActiveView.StoryIdeas,
+      label: 'Settings',
+      complete:
+        projectState.storyIdeasKeywords.trim().length > 0 &&
+        projectState.generatedStoryIdeas.length > 0 &&
+        hasSelectedStory,
+    },
+    { id: ActiveView.ScriptWriter, label: 'Script', complete: scriptsReadyForTargets },
+    { id: ActiveView.TextToSpeech, label: 'Voice', complete: audioReadyForTargets },
+    { id: ActiveView.SceneImages, label: 'Visuals', complete: scenePlansReadyForTargets || hasAnyVisualOutput },
+    { id: ActiveView.ThumbnailMaker, label: 'Cover', complete: hasThumbnail },
+    { id: ActiveView.ProjectExport, label: 'Export', complete: exportReady },
+  ];
+
+  const guidanceByView: Partial<Record<ActiveView, { title: string; instructions: string[]; criteria: WorkflowCriterion[] }>> = {
+    [ActiveView.StoryIdeas]: {
+      title: 'Step 1: Settings Guidance',
+      instructions: [
+        'Describe the core concept, then generate ideas.',
+        'Pick a story or episodes to carry into script writing.',
+        'Use style and duration settings to set script intent before writing.',
+      ],
+      criteria: [
+        { label: 'Concept prompt is provided.', complete: projectState.storyIdeasKeywords.trim().length > 0 },
+        { label: 'At least one idea has been generated.', complete: projectState.generatedStoryIdeas.length > 0 },
+        { label: 'At least one story/episode is selected.', complete: hasSelectedStory },
+      ],
+    },
+    [ActiveView.ScriptWriter]: {
+      title: 'Step 2: Script Guidance',
+      instructions: [
+        'Refine the structural outline for the active episode.',
+        'Generate the script using the quality contract and duration target.',
+        'Review script output, then continue only after target episodes are scripted.',
+      ],
+      criteria: [
+        {
+          label: 'Narrative style is selected.',
+          complete: [ScriptType.SingleVoice, ScriptType.TwoVoice, ScriptType.MultiVoice].includes(projectState.sw_selectedScriptType),
+        },
+        { label: 'A story or episode is selected.', complete: hasSelectedStory },
+        { label: 'Scripts exist for selected targets.', complete: scriptsReadyForTargets },
+      ],
+    },
+    [ActiveView.TextToSpeech]: {
+      title: 'Step 3: Voice Guidance',
+      instructions: [
+        'Analyze the script so scenes and dialogue are parsed.',
+        'Synthesize all scenes for the active episode(s).',
+        'Verify playback and downloadable clips before moving to visuals.',
+      ],
+      criteria: [
+        { label: 'Scripts are available for selected targets.', complete: scriptsReadyForTargets },
+        { label: 'Script analysis exists for selected targets.', complete: analyzedReadyForTargets },
+        { label: 'At least one synthesized clip exists per selected target.', complete: audioReadyForTargets },
+      ],
+    },
+    [ActiveView.SceneImages]: {
+      title: 'Step 4: Visual Guidance',
+      instructions: [
+        'Generate scene plans from the script for each target episode.',
+        'Create visuals for key scenes and verify style consistency.',
+        'Continue after each selected episode has at least a scene plan.',
+      ],
+      criteria: [
+        { label: 'Scripts are available for selected targets.', complete: scriptsReadyForTargets },
+        { label: 'Scene plans exist for selected targets.', complete: scenePlansReadyForTargets },
+        { label: 'At least one visual output exists.', complete: hasAnyVisualOutput },
+      ],
+    },
+    [ActiveView.ThumbnailMaker]: {
+      title: 'Cover Guidance',
+      instructions: [
+        'Draft a cover prompt matching the project tone.',
+        'Generate and select the preferred thumbnail.',
+        'Save the cover before final export packaging.',
+      ],
+      criteria: [
+        { label: 'A project story context exists.', complete: !!projectState.storyForScripting || selectedEpisodes.length > 0 },
+        { label: 'Thumbnail prompt is set or a thumbnail exists.', complete: projectState.tm_prompt.trim().length > 0 || hasThumbnail },
+        { label: 'Thumbnail image is generated.', complete: hasThumbnail },
+      ],
+    },
+    [ActiveView.ProjectExport]: {
+      title: 'Export Guidance',
+      instructions: [
+        'Review scripts, audio clips, and generated visuals for the active episode.',
+        'Run episode export or full-series export as needed.',
+        'Confirm packaged assets before publishing.',
+      ],
+      criteria: [
+        { label: 'Scripts are available for selected targets.', complete: scriptsReadyForTargets },
+        { label: 'Audio or visuals are available for export.', complete: audioReadyForTargets || hasAnyVisualOutput },
+        { label: 'Export prerequisites are complete.', complete: exportReady },
+      ],
+    },
+  };
+
   const renderView = () => {
     if (firebaseLoading) return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
 
@@ -487,8 +619,6 @@ const AppContent: React.FC = () => {
         <button onClick={() => {}} className="px-6 py-2 bg-orange-500 text-white rounded font-bold">Video Coming Soon (Phase 2)</button>
       </div>
     );
-
-    const selectedEpisodes = projectState.generatedStoryIdeas.filter(i => projectState.selectedIdeaIds.includes(i.id) && !i.isSeriesConcept);
 
     switch (activeView) {
       case ActiveView.StoryIdeas: 
@@ -638,6 +768,15 @@ const AppContent: React.FC = () => {
       </header>
 
       <main className="flex-grow flex flex-col">
+        {activeView !== ActiveView.Hub && guidanceByView[activeView] && (
+          <ContextualStepGuide
+            activeView={activeView}
+            steps={workflowSteps}
+            title={guidanceByView[activeView]!.title}
+            instructions={guidanceByView[activeView]!.instructions}
+            criteria={guidanceByView[activeView]!.criteria}
+          />
+        )}
         {renderView()}
       </main>
       <InfoBar />

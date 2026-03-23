@@ -13,6 +13,10 @@ export const API_KEY_MISSING_MESSAGE = 'API Key is missing. Please check your se
 export const STORY_IDEAS_PLACEHOLDER = "Enter a topic like 'A documentary on marine life' or 'A true crime mystery about a missing painting'.";
 export const SCRIPT_WRITER_PLACEHOLDER = "Outline your script here. Include characters, key locations, and main events.";
 export const SCENE_IMAGE_GLOBAL_STYLE_PLACEHOLDER = "e.g., 'Realistic 8k photography', 'Cinematic lighting', 'Anime style'";
+export const DEFAULT_SCRIPT_DURATION_MINUTES = 8;
+export const DEFAULT_SCRIPT_DURATION_MAX_MINUTES = 12;
+export const PRO_SCRIPT_DURATION_MIN_BOUND = 4;
+export const PRO_SCRIPT_DURATION_MAX_BOUND = 30;
 
 export const IMAGE_GENERATOR_PLACEHOLDER = "Describe the image you want to create...";
 export const THUMBNAIL_MAKER_PLACEHOLDER = "Describe your YouTube thumbnail idea...";

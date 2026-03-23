@@ -4,6 +4,9 @@ import { ActionButton } from '../common/ActionButton.tsx';
 import { StoryIdea, SceneImageDefinition, TitleCardData, GeneratedImage, SynthesizedChunk, AIAnalyzedScript } from '../../types.ts';
 import JSZip from 'jszip';
 
+const sanitizeZipFilename = (value: string): string =>
+  value.trim().replace(/[^a-zA-Z0-9._-]/g, '_');
+
 interface Props {
   story: StoryIdea | null;
   selectedEpisodes: StoryIdea[];
@@ -81,7 +84,7 @@ export const ProjectExport: React.FC<Props> = ({
       if (a.audioDataUrl) {
         try {
           const blob = await fetch(a.audioDataUrl).then(r => r.blob());
-          audioFolder?.file(a.downloadFilename, blob);
+          audioFolder?.file(sanitizeZipFilename(a.downloadFilename), blob);
         } catch (e) {
           console.error(`Failed to fetch audio chunk ${a.downloadFilename}`, e);
         }

@@ -165,6 +165,8 @@ export interface ProStorySettings {
   incitingIncidentIdea: string; 
   productionProtocol: ProductionProtocol;
   videoBudget: number;
+  scriptDurationMinMinutes: number;
+  scriptDurationMaxMinutes: number;
   realisticImages: boolean;
   sourceFile?: { name: string; data: string; mimeType: string };
 }
@@ -236,6 +238,7 @@ export interface SynthesizedChunk {
   audioDataUrl: string; 
   sceneNumbers: number[];
   downloadFilename: string;
+  kind?: 'scene' | 'compiled_master';
 }
 
 export interface TitleCardData {
