@@ -102,6 +102,27 @@ const combineSceneWavsToMaster = async (sceneChunks: SynthesizedChunk[]): Promis
 const resolveNarratorFallbackVoice = (voiceKey: PresetVoiceKey): PresetVoiceKey =>
   voiceKey.endsWith('_M') ? voiceKey : 'Narrator_M';
 
+const sanitizeFilenameToken = (value: string): string =>
+  value.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+const sanitizeDownloadFilename = (value: string): string =>
+  value.trim().replace(/[^a-zA-Z0-9._-]/g, '_');
+
+const stripSpeakerColon = (speaker: string): string => speaker.replace(/:+$/g, '').trim();
+const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const normalizeDialogueForSpeech = (
+  dialogue: Array<{ speaker: string; text: string }>
+): Array<{ speaker: string; text: string }> =>
+  dialogue
+    .map((line) => {
+      const speaker = stripSpeakerColon((line.speaker || 'Narrator').trim()) || 'Narrator';
+      let text = (line.text || '').trim();
+      const speakerPrefix = new RegExp(`^${escapeRegex(speaker)}\\s*:\\s*`, 'i');
+      text = text.replace(speakerPrefix, '').replace(/^:+\s*/, '').trim();
+      return { speaker, text };
+    })
+    .filter((line) => line.text.length > 0);
+
 export const TextToSpeech: React.FC<Props> = ({
   story, selectedEpisodes, scripts, editableScripts, onEditableScriptsChange,
   defaultVoiceKey, onDefaultVoiceKeyChange, characterVoicePresets, analyzedScripts, onAnalyzedScriptsChange,
@@ -169,6 +190,7 @@ export const TextToSpeech: React.FC<Props> = ({
     baseAudioChunks: Record<string, SynthesizedChunk[]>,
     onlySceneNumbers?: number[]
   ): Promise<{ nextAudioChunks: Record<string, SynthesizedChunk[]>; failedScenes: number[] }> => {
+    const safeEpisodeId = sanitizeFilenameToken(episodeId);
     const allEpisodeChunks: SynthesizedChunk[] = [...(baseAudioChunks[episodeId] || [])];
     const sceneChunks: SynthesizedChunk[] = toSceneChunks(allEpisodeChunks);
     const scenesToProcess = analyzed.scenes.filter((scene) => {
@@ -184,15 +206,20 @@ export const TextToSpeech: React.FC<Props> = ({
 
     for (let index = 0; index < scenesToProcess.length; index += 1) {
       const scene = scenesToProcess[index];
+      const normalizedDialogue = normalizeDialogueForSpeech(scene.dialogue);
+      if (normalizedDialogue.length === 0) {
+        failedScenes.push(scene.sceneNumber);
+        continue;
+      }
       let sceneDone = false;
       for (let attempt = 1; attempt <= 2; attempt += 1) {
         try {
-          const audioUrl = await generateSpeech(scene.dialogue, characterVoicePresets, narratorFallbackVoice);
+          const audioUrl = await generateSpeech(normalizedDialogue, characterVoicePresets, narratorFallbackVoice);
           const chunk: SynthesizedChunk = {
             id: `s-${episodeId}-${scene.sceneNumber}-${Date.now()}`,
             audioDataUrl: audioUrl,
             sceneNumbers: [scene.sceneNumber],
-            downloadFilename: `ep_${episodeId}_scene_${scene.sceneNumber}.wav`,
+            downloadFilename: `ep_${safeEpisodeId}_scene_${scene.sceneNumber}.wav`,
             kind: 'scene',
           };
           const existingIndex = sceneChunks.findIndex((existing) => existing.sceneNumbers.includes(scene.sceneNumber));
@@ -227,7 +254,7 @@ export const TextToSpeech: React.FC<Props> = ({
           id: `master-${episodeId}-${Date.now()}`,
           audioDataUrl: masterAudioUrl,
           sceneNumbers: sceneChunks.flatMap((chunk) => chunk.sceneNumbers),
-          downloadFilename: `ep_${episodeId}_master_compiled.wav`,
+          downloadFilename: `ep_${safeEpisodeId}_master_compiled.wav`,
           kind: 'compiled_master',
         };
         nextAudioChunks = { ...nextAudioChunks, [episodeId]: [...sceneChunks, compiled] };
@@ -521,7 +548,7 @@ export const TextToSpeech: React.FC<Props> = ({
                         <audio controls src={currentMasterChunk.audioDataUrl} className="h-9" />
                         <DownloadButton
                           fileUrl={currentMasterChunk.audioDataUrl}
-                          fileName={currentMasterChunk.downloadFilename}
+                          fileName={sanitizeDownloadFilename(currentMasterChunk.downloadFilename)}
                           buttonText="MASTER WAV"
                           className="neu-btn text-xs py-1 px-4"
                         />
@@ -569,7 +596,12 @@ export const TextToSpeech: React.FC<Props> = ({
                                  >
                                    {isManualPlaying ? '⏸' : '▶'}
                                  </button>
-                                 <DownloadButton fileUrl={chunk.audioDataUrl} fileName={chunk.downloadFilename} buttonText="WAV" className="neu-btn text-xs py-1 px-4" />
+                                <DownloadButton
+                                  fileUrl={chunk.audioDataUrl}
+                                  fileName={sanitizeDownloadFilename(chunk.downloadFilename)}
+                                  buttonText="WAV"
+                                  className="neu-btn text-xs py-1 px-4"
+                                />
                             </div>
                         ) : (
                             <div className="text-xs text-neu-text font-bold uppercase">
