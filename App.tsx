@@ -157,6 +157,7 @@ const AppContent: React.FC = () => {
   const [projectState, setProjectState] = useState<ProjectState>(() => createEmptyProjectState(false));
 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [autosavePausedForQuota, setAutosavePausedForQuota] = useState(false);
   const [checkoutPriceId, setCheckoutPriceId] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const saveAttemptRef = useRef(0);
@@ -225,6 +226,10 @@ const AppContent: React.FC = () => {
   }, [profile]);
 
   useEffect(() => {
+    setAutosavePausedForQuota(false);
+  }, [user?.uid]);
+
+  useEffect(() => {
     setProjectState((prev) => {
       const nextLastEditorView = activeView === ActiveView.Hub ? prev.lastEditorView : activeView;
       if (prev.activeView === activeView && prev.lastEditorView === nextLastEditorView) {
@@ -282,9 +287,16 @@ const AppContent: React.FC = () => {
       code.includes('unavailable') ||
       code.includes('deadline-exceeded') ||
       code.includes('aborted') ||
-      code.includes('resource-exhausted') ||
       code.includes('internal')
     );
+  };
+
+  const isQuotaExceededSaveError = (error: unknown): boolean => {
+    const code = typeof (error as { code?: unknown })?.code === 'string'
+      ? String((error as { code?: string }).code).toLowerCase()
+      : '';
+    const message = error instanceof Error ? error.message.toLowerCase() : '';
+    return code.includes('resource-exhausted') || message.includes('quota');
   };
 
   // Auto-save project state — debounced 2s after any state change.
@@ -292,6 +304,7 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     if (!user) return;
     if (!stateHasPersistableContent(projectState)) return;
+    if (autosavePausedForQuota) return;
 
     const persistedState: ProjectState = {
       ...projectState,
@@ -337,6 +350,9 @@ const AppContent: React.FC = () => {
           const shouldRetry = attempt < maxAttempts && isRetryableSaveError(error);
           if (!shouldRetry) {
             if (!cancelled && saveAttemptId === saveAttemptRef.current) {
+              if (isQuotaExceededSaveError(error)) {
+                setAutosavePausedForQuota(true);
+              }
               setSaveStatus('error');
             }
             return;
@@ -352,7 +368,7 @@ const AppContent: React.FC = () => {
       cancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [activeView, projectState, user, saveProject]);
+  }, [activeView, autosavePausedForQuota, projectState, user, saveProject]);
 
   // Upload scene images to Storage immediately after generation.
   // Optimistic: state updates instantly with base64 for UI, then updates again
@@ -773,11 +789,13 @@ const AppContent: React.FC = () => {
           <div className="flex items-center gap-4 mt-4 md:mt-0">
             {projectState.projectId && (
               <span className={`text-[10px] font-bold uppercase tracking-widest transition-all ${
+                autosavePausedForQuota ? 'text-rose-500' :
                 saveStatus === 'saving' ? 'text-amber-500 animate-pulse' :
                 saveStatus === 'saved'  ? 'text-emerald-500' :
                 saveStatus === 'error'  ? 'text-red-500' : 'text-neu-text opacity-30'
               }`}>
-                {saveStatus === 'saving' ? '● Saving...' :
+                {autosavePausedForQuota ? '⚠ Save paused (quota reached)' :
+                 saveStatus === 'saving' ? '● Saving...' :
                  saveStatus === 'saved'  ? '✓ Saved' :
                  saveStatus === 'error'  ? '✕ Save failed' : '● Unsaved'}
               </span>
