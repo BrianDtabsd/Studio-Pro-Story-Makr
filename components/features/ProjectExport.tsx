@@ -9,7 +9,6 @@ const sanitizeZipFilename = (value: string): string =>
 
 const hasNonEmptyMediaUrl = (url: string | undefined): boolean =>
   typeof url === 'string' && url.trim().length > 0;
-
 interface Props {
   story: StoryIdea | null;
   selectedEpisodes: StoryIdea[];
