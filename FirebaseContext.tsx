@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { auth, signInWithPopup, googleProvider, onAuthStateChanged, getDoc, setDoc, query, onSnapshot, deleteDoc, User } from './firebase';
 import { UserProfile, Project } from './types';
 import { deleteProjectAssets } from './services/storageService';
@@ -31,6 +31,28 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [writesBlockedByQuota, setWritesBlockedByQuota] = useState(false);
+  const writesBlockedByQuotaRef = useRef(false);
+
+  const isQuotaExceededError = (error: unknown): boolean => {
+    const code = typeof (error as { code?: unknown })?.code === 'string'
+      ? String((error as { code?: string }).code).toLowerCase()
+      : '';
+    const message = error instanceof Error ? error.message.toLowerCase() : '';
+    return code.includes('resource-exhausted') || message.includes('quota');
+  };
+
+  const markWritesBlockedByQuota = () => {
+    if (!writesBlockedByQuotaRef.current) {
+      writesBlockedByQuotaRef.current = true;
+      setWritesBlockedByQuota(true);
+      console.warn('Firestore writes paused for this session: quota exhausted.');
+    }
+  };
+
+  useEffect(() => {
+    writesBlockedByQuotaRef.current = writesBlockedByQuota;
+  }, [writesBlockedByQuota]);
 
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
@@ -77,7 +99,17 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             joinedDate: Date.now(),
             isPro: false
           };
-          await setDoc(profileRef, toUserProfileDoc(newProfile));
+          if (!writesBlockedByQuotaRef.current) {
+            try {
+              await setDoc(profileRef, toUserProfileDoc(newProfile));
+            } catch (error) {
+              if (isQuotaExceededError(error)) {
+                markWritesBlockedByQuota();
+              } else {
+                throw error;
+              }
+            }
+          }
           if (eventId !== authEventId) return;
           setProfile(newProfile);
         }
@@ -146,9 +178,15 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const saveProject = async (project: Project) => {
     if (!user) throw new Error('You must be signed in to save projects.');
+    if (writesBlockedByQuotaRef.current) {
+      const quotaError = new Error('Firestore write quota exhausted for this session.');
+      (quotaError as Error & { code?: string }).code = 'resource-exhausted';
+      throw quotaError;
+    }
     try {
       await setDoc(userProjectDocRef(user.uid, project.id), project);
     } catch (error) {
+      if (isQuotaExceededError(error)) markWritesBlockedByQuota();
       console.error("Firestore Error (SAVE project):", error);
       throw error;
     }
@@ -156,21 +194,25 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const deleteProject = async (projectId: string) => {
     if (!user) return;
+    if (writesBlockedByQuotaRef.current) return;
     try {
       // Best-effort Storage cleanup — never blocks project deletion if it fails
       await deleteProjectAssets(user.uid, projectId).catch(() => {});
       await deleteDoc(userProjectDocRef(user.uid, projectId));
     } catch (error) {
+      if (isQuotaExceededError(error)) markWritesBlockedByQuota();
       console.error("Firestore Error (DELETE project):", error);
     }
   };
 
   const updateProfile = async (updates: Partial<UserProfile>) => {
     if (!user) return;
+    if (writesBlockedByQuotaRef.current) return;
     try {
       await setDoc(userProfileDocRef(user.uid), toUserProfileUpdate(updates), { merge: true });
       // onSnapshot listener on the user doc will pick up the change automatically.
     } catch (error) {
+      if (isQuotaExceededError(error)) markWritesBlockedByQuota();
       console.error("Firestore Error (UPDATE profile):", error);
     }
   };
