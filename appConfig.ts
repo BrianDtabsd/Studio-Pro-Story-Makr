@@ -60,6 +60,15 @@ const parseMode = (raw: string | undefined, fallback: RuntimeMode): RuntimeMode 
   return fallback;
 };
 
+const normalizeConfigString = (value: string | undefined): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return undefined;
+  const normalized = trimmed.toLowerCase();
+  if (normalized === 'undefined' || normalized === 'null') return undefined;
+  return trimmed;
+};
+
 const readEnvConfig = (): RuntimeAppConfig => {
   const envConfig: RuntimeAppConfig = {};
 
@@ -85,8 +94,9 @@ const readEnvConfig = (): RuntimeAppConfig => {
     | 'CHRONOS_STRIPE_CANCEL_URL';
 
   const putString = (key: StringConfigKey, value: string | undefined) => {
-    if (typeof value === 'string' && value.trim().length > 0) {
-      envConfig[key] = value;
+    const normalized = normalizeConfigString(value);
+    if (normalized) {
+      envConfig[key] = normalized;
     }
   };
 
@@ -121,13 +131,30 @@ export const getAppConfig = (): RuntimeAppConfig => {
   return { ...(window.APP_CONFIG || {}), ...envConfig };
 };
 
-const firstNonEmpty = (...values: Array<string | undefined>): string | undefined =>
-  values.find((v) => typeof v === 'string' && v.trim().length > 0);
+const firstNonEmpty = (...values: Array<string | undefined>): string | undefined => {
+  for (const value of values) {
+    const normalized = normalizeConfigString(value);
+    if (normalized) return normalized;
+  }
+  return undefined;
+};
 
 export const getStoryMakrCallableNames = (): StoryMakrCallableNames => {
   const config = getAppConfig();
-  const configured = config.STORYMAKR_AI_CALLABLE_NAMES || config.CHRONOS_CALLABLE_NAMES || {};
-  const individualOverrides: Partial<StoryMakrCallableNames> = {
+  const configuredRaw = config.STORYMAKR_AI_CALLABLE_NAMES || config.CHRONOS_CALLABLE_NAMES || {};
+  const normalizeCallableOverrides = (
+    overrides: Partial<StoryMakrCallableNames>
+  ): Partial<StoryMakrCallableNames> => {
+    const next: Partial<StoryMakrCallableNames> = {};
+    (Object.keys(DEFAULT_STORYMAKR_CALLABLE_NAMES) as StoryMakrCallableKey[]).forEach((key) => {
+      const normalized = normalizeConfigString(overrides[key]);
+      if (normalized) next[key] = normalized;
+    });
+    return next;
+  };
+
+  const configured = normalizeCallableOverrides(configuredRaw);
+  const individualOverrides = normalizeCallableOverrides({
     generateStoryIdeas: config.STORYMAKR_AI_GENERATE_STORY_IDEAS_CALLABLE,
     generateScript: config.STORYMAKR_AI_GENERATE_SCRIPT_CALLABLE,
     analyzeScript: config.STORYMAKR_AI_ANALYZE_SCRIPT_CALLABLE,
@@ -135,7 +162,7 @@ export const getStoryMakrCallableNames = (): StoryMakrCallableNames => {
     generateSpeech: config.STORYMAKR_AI_GENERATE_SPEECH_CALLABLE,
     generateImageForPrompt: config.STORYMAKR_AI_GENERATE_IMAGE_CALLABLE,
     generateVideoForPrompt: config.STORYMAKR_AI_GENERATE_VIDEO_CALLABLE,
-  };
+  });
   return { ...DEFAULT_STORYMAKR_CALLABLE_NAMES, ...configured, ...individualOverrides };
 };
 

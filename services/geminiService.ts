@@ -10,7 +10,17 @@ import {
 import { getStoryMakrCallableNames, getStoryMakrFunctionsMode, type StoryMakrCallableKey } from "../appConfig.ts";
 import { makeCallable } from "./firebaseFunctions.ts";
 
-const getCallableName = (key: StoryMakrCallableKey): string => getStoryMakrCallableNames()[key];
+const getCallableName = (key: StoryMakrCallableKey): string => {
+  const callableName = getStoryMakrCallableNames()[key];
+  if (typeof callableName !== "string") {
+    throw new Error(`Callable name for "${key}" is missing.`);
+  }
+  const trimmed = callableName.trim();
+  if (!trimmed || trimmed.toLowerCase() === "undefined" || trimmed.toLowerCase() === "null") {
+    throw new Error(`Callable name for "${key}" is invalid: "${callableName}".`);
+  }
+  return trimmed;
+};
 
 const ensureCloudFunctionsEnabled = () => {
   const mode = getStoryMakrFunctionsMode();

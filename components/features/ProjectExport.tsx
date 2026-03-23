@@ -7,6 +7,9 @@ import JSZip from 'jszip';
 const sanitizeZipFilename = (value: string): string =>
   value.trim().replace(/[^a-zA-Z0-9._-]/g, '_');
 
+const hasNonEmptyMediaUrl = (url: string | undefined): boolean =>
+  typeof url === 'string' && url.trim().length > 0;
+
 interface Props {
   story: StoryIdea | null;
   selectedEpisodes: StoryIdea[];
@@ -35,7 +38,7 @@ export const ProjectExport: React.FC<Props> = ({
     story;
   const currentScript = activeStory ? (editableScripts[activeStory.id] || scripts[activeStory.id] || '') : '';
   const currentScenes = activeStory ? (sceneImageDefinitions[activeStory.id] || []) : [];
-  const currentAudio = activeStory ? (audioChunks[activeStory.id] || []) : [];
+  const currentAudio = activeStory ? (audioChunks[activeStory.id] || []).filter((chunk) => hasNonEmptyMediaUrl(chunk.audioDataUrl)) : [];
   const currentAnalyzed = activeStory ? analyzedScripts[activeStory.id] : null;
 
   useEffect(() => {
@@ -81,7 +84,7 @@ export const ProjectExport: React.FC<Props> = ({
     const audio = audioChunks[episode.id] || [];
     const audioFolder = epFolder.folder("audio");
     for (const a of audio) {
-      if (a.audioDataUrl) {
+      if (hasNonEmptyMediaUrl(a.audioDataUrl)) {
         try {
           const blob = await fetch(a.audioDataUrl).then(r => r.blob());
           audioFolder?.file(sanitizeZipFilename(a.downloadFilename), blob);
@@ -170,7 +173,7 @@ export const ProjectExport: React.FC<Props> = ({
       const scene = currentScenes[playingIndex];
       const audioChunk = currentAudio.find(a => a.sceneNumbers.includes(scene.sceneNumber));
       
-      if (audioChunk && audioRef.current) {
+      if (audioChunk && hasNonEmptyMediaUrl(audioChunk.audioDataUrl) && audioRef.current) {
         audioRef.current.src = audioChunk.audioDataUrl;
         audioRef.current.play().catch(console.error);
         
