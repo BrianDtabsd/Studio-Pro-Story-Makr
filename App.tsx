@@ -124,7 +124,28 @@ const clearStaleGenerationFlags = (state: ProjectState): ProjectState => ({
   simg_sceneImageDefinitions: Object.fromEntries(
     Object.entries(state.simg_sceneImageDefinitions).map(([ideaId, scenes]) => [
       ideaId,
-      scenes.map((scene) => ({ ...scene, isGenerating: false })),
+      scenes.map((scene) => ({
+        ...scene,
+        isGenerating: false,
+        generatedImageUrl: scene.generatedImageUrl?.trim() ? scene.generatedImageUrl : undefined,
+        generatedVideoUrl: scene.generatedVideoUrl?.trim() ? scene.generatedVideoUrl : undefined,
+      })),
+    ])
+  ),
+  audioChunks: Object.fromEntries(
+    Object.entries(state.audioChunks).map(([ideaId, chunks]) => [
+      ideaId,
+      chunks.filter((chunk) => chunk.audioDataUrl?.trim().length > 0),
+    ])
+  ),
+  ffimg_generatedImages: state.ffimg_generatedImages.filter((img) => img.src?.trim().length > 0),
+  tm_generatedThumbnail: state.tm_generatedThumbnail?.src?.trim()
+    ? state.tm_generatedThumbnail
+    : null,
+  tcg_titleCards: Object.fromEntries(
+    Object.entries(state.tcg_titleCards).map(([ideaId, cards]) => [
+      ideaId,
+      cards.filter((card) => card.src?.trim().length > 0),
     ])
   ),
 });

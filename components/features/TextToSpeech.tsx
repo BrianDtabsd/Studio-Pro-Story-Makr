@@ -27,11 +27,14 @@ interface Props {
 const isCompiledMasterChunk = (chunk: SynthesizedChunk): boolean =>
   chunk.kind === 'compiled_master' || chunk.downloadFilename.includes('master_compiled');
 
+const hasNonEmptyMediaUrl = (url: string | undefined): boolean =>
+  typeof url === 'string' && url.trim().length > 0;
+
 const toSceneChunks = (chunks: SynthesizedChunk[]): SynthesizedChunk[] =>
-  chunks.filter((chunk) => !isCompiledMasterChunk(chunk));
+  chunks.filter((chunk) => !isCompiledMasterChunk(chunk) && hasNonEmptyMediaUrl(chunk.audioDataUrl));
 
 const toMasterChunk = (chunks: SynthesizedChunk[]): SynthesizedChunk | null =>
-  chunks.find((chunk) => isCompiledMasterChunk(chunk)) || null;
+  chunks.find((chunk) => isCompiledMasterChunk(chunk) && hasNonEmptyMediaUrl(chunk.audioDataUrl)) || null;
 
 const writeWavString = (view: DataView, offset: number, value: string) => {
   for (let i = 0; i < value.length; i += 1) {
@@ -109,6 +112,10 @@ const sanitizeDownloadFilename = (value: string): string =>
 
 const stripSpeakerColon = (speaker: string): string => speaker.replace(/:+$/g, '').trim();
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const isAbortError = (error: unknown): boolean =>
+  error instanceof DOMException
+    ? error.name === 'AbortError'
+    : typeof (error as { name?: unknown })?.name === 'string' && (error as { name: string }).name === 'AbortError';
 
 const normalizeDialogueForSpeech = (
   dialogue: Array<{ speaker: string; text: string }>
@@ -387,6 +394,7 @@ export const TextToSpeech: React.FC<Props> = ({
     audioEl.play().then(() => {
       setManualPlayingKey(key);
     }).catch((playError) => {
+      if (isAbortError(playError)) return;
       console.error("Audio play failed:", playError);
       setManualPlayingKey(null);
     });
@@ -409,6 +417,7 @@ export const TextToSpeech: React.FC<Props> = ({
       if (audioEl) {
         audioEl.currentTime = 0;
         audioEl.play().catch(playError => {
+          if (isAbortError(playError)) return;
           console.error("Audio play failed:", playError);
           setPlayingIndex(playingIndex + 1);
         });

@@ -28,6 +28,7 @@ export const ThumbnailMaker: React.FC<{
 }> = ({ initialPrompt, onPromptChange, initialThumbnail, onThumbnailChange, storyIdeaForTitle }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasThumbnailImage = !!initialThumbnail?.src?.trim();
 
   useEffect(() => {
     if (storyIdeaForTitle?.title && !initialPrompt) {
@@ -87,16 +88,16 @@ export const ThumbnailMaker: React.FC<{
                         <p className="mt-4 text-xs font-bold text-accent-orange uppercase animate-pulse">Designing High-CTR Visual...</p>
                     </div>
                 )}
-                {initialThumbnail ? (
+                {hasThumbnailImage ? (
                     <div className="group relative w-full h-full">
                         <img
-                            src={initialThumbnail.src}
+                            src={initialThumbnail!.src}
                             alt={initialThumbnail.prompt || `Thumbnail for ${storyIdeaForTitle?.title || 'generated image'}`}
                             title={initialThumbnail.prompt || storyIdeaForTitle?.title || 'Generated thumbnail'}
                             className="w-full h-full object-cover"
                         />
                         <div className="absolute inset-0 bg-neu-base/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-4">
-                            <DownloadButton fileUrl={initialThumbnail.src} fileName="thumbnail_master.jpg" buttonText="SAVE MASTER" className="neu-btn text-accent-orange font-bold" />
+                            <DownloadButton fileUrl={initialThumbnail!.src} fileName="thumbnail_master.jpg" buttonText="SAVE MASTER" className="neu-btn text-accent-orange font-bold" />
                         </div>
                     </div>
                 ) : (
