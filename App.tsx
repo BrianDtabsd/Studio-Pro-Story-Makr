@@ -157,7 +157,6 @@ const AppContent: React.FC = () => {
   const [projectState, setProjectState] = useState<ProjectState>(() => createEmptyProjectState(false));
 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const [autosavePausedForQuota, setAutosavePausedForQuota] = useState(false);
   const [checkoutPriceId, setCheckoutPriceId] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const saveAttemptRef = useRef(0);
@@ -226,10 +225,6 @@ const AppContent: React.FC = () => {
   }, [profile]);
 
   useEffect(() => {
-    setAutosavePausedForQuota(false);
-  }, [user?.uid]);
-
-  useEffect(() => {
     setProjectState((prev) => {
       const nextLastEditorView = activeView === ActiveView.Hub ? prev.lastEditorView : activeView;
       if (prev.activeView === activeView && prev.lastEditorView === nextLastEditorView) {
@@ -291,20 +286,12 @@ const AppContent: React.FC = () => {
     );
   };
 
-  const isQuotaExceededSaveError = (error: unknown): boolean => {
-    const code = typeof (error as { code?: unknown })?.code === 'string'
-      ? String((error as { code?: string }).code).toLowerCase()
-      : '';
-    const message = error instanceof Error ? error.message.toLowerCase() : '';
-    return code.includes('resource-exhausted') || message.includes('quota');
-  };
-
-  // Auto-save project state — debounced 2s after any state change.
-  // Sanitizes state before writing so base64/blob URLs never hit Firestore.
-  useEffect(() => {
+  const handleManualSave = async () => {
     if (!user) return;
-    if (!stateHasPersistableContent(projectState)) return;
-    if (autosavePausedForQuota) return;
+    if (!stateHasPersistableContent(projectState)) {
+      setSaveStatus('idle');
+      return;
+    }
 
     const persistedState: ProjectState = {
       ...projectState,
@@ -316,15 +303,14 @@ const AppContent: React.FC = () => {
         prev.projectId ? prev : { ...prev, projectId: persistedState.projectId }
       );
     }
+
     const identity = deriveProjectIdentity(persistedState);
-    if (!identity) return;
+    if (!identity) {
+      setSaveStatus('idle');
+      return;
+    }
 
     const saveAttemptId = ++saveAttemptRef.current;
-    let cancelled = false;
-
-    // Mark current draft as unsaved while debounce/retry pipeline runs.
-    setSaveStatus((prev) => (prev === 'saving' ? prev : 'idle'));
-
     const project: Project = {
       id: identity.id,
       title: identity.title,
@@ -334,41 +320,30 @@ const AppContent: React.FC = () => {
       state: sanitizeStateForFirestore(persistedState),
     };
 
-    const save = async () => {
-      const maxAttempts = 3;
-      const retryBaseDelayMs = 350;
-      setSaveStatus('saving');
+    const maxAttempts = 3;
+    const retryBaseDelayMs = 350;
+    setSaveStatus('saving');
 
-      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-        try {
-          await saveProject(project);
-          if (!cancelled && saveAttemptId === saveAttemptRef.current) {
-            setSaveStatus('saved');
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        await saveProject(project);
+        if (saveAttemptId === saveAttemptRef.current) {
+          setSaveStatus('saved');
+        }
+        return;
+      } catch (error) {
+        const shouldRetry = attempt < maxAttempts && isRetryableSaveError(error);
+        if (!shouldRetry) {
+          if (saveAttemptId === saveAttemptRef.current) {
+            setSaveStatus('error');
           }
           return;
-        } catch (error) {
-          const shouldRetry = attempt < maxAttempts && isRetryableSaveError(error);
-          if (!shouldRetry) {
-            if (!cancelled && saveAttemptId === saveAttemptRef.current) {
-              if (isQuotaExceededSaveError(error)) {
-                setAutosavePausedForQuota(true);
-              }
-              setSaveStatus('error');
-            }
-            return;
-          }
-          await wait(retryBaseDelayMs * (2 ** (attempt - 1)));
-          if (cancelled || saveAttemptId !== saveAttemptRef.current) return;
         }
+        await wait(retryBaseDelayMs * (2 ** (attempt - 1)));
+        if (saveAttemptId !== saveAttemptRef.current) return;
       }
-    };
-
-    const timeoutId = setTimeout(() => { void save(); }, 2000);
-    return () => {
-      cancelled = true;
-      clearTimeout(timeoutId);
-    };
-  }, [activeView, autosavePausedForQuota, projectState, user, saveProject]);
+    }
+  };
 
   // Upload scene images to Storage immediately after generation.
   // Optimistic: state updates instantly with base64 for UI, then updates again
@@ -789,17 +764,23 @@ const AppContent: React.FC = () => {
           <div className="flex items-center gap-4 mt-4 md:mt-0">
             {projectState.projectId && (
               <span className={`text-[10px] font-bold uppercase tracking-widest transition-all ${
-                autosavePausedForQuota ? 'text-rose-500' :
                 saveStatus === 'saving' ? 'text-amber-500 animate-pulse' :
                 saveStatus === 'saved'  ? 'text-emerald-500' :
                 saveStatus === 'error'  ? 'text-red-500' : 'text-neu-text opacity-30'
               }`}>
-                {autosavePausedForQuota ? '⚠ Save paused (quota reached)' :
-                 saveStatus === 'saving' ? '● Saving...' :
+                {saveStatus === 'saving' ? '● Saving...' :
                  saveStatus === 'saved'  ? '✓ Saved' :
                  saveStatus === 'error'  ? '✕ Save failed' : '● Unsaved'}
               </span>
             )}
+            <button
+              type="button"
+              onClick={() => { void handleManualSave(); }}
+              disabled={saveStatus === 'saving' || !stateHasPersistableContent(projectState)}
+              className="neu-btn px-4 py-1 text-xs font-bold text-neu-text-dark disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {saveStatus === 'saving' ? 'Saving…' : 'Save'}
+            </button>
             <span className="text-sm font-bold text-neu-text-dark">{profile?.username}</span>
             <button onClick={signOut} className="neu-btn px-4 py-1 text-xs font-bold text-neu-text hover:text-red-500">Sign Out</button>
           </div>

@@ -99,17 +99,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             joinedDate: Date.now(),
             isPro: false
           };
-          if (!writesBlockedByQuotaRef.current) {
-            try {
-              await setDoc(profileRef, toUserProfileDoc(newProfile));
-            } catch (error) {
-              if (isQuotaExceededError(error)) {
-                markWritesBlockedByQuota();
-              } else {
-                throw error;
-              }
-            }
-          }
+          // Do not auto-create profile docs on sign-in. This avoids background
+          // writes before the user explicitly saves any changes.
           if (eventId !== authEventId) return;
           setProfile(newProfile);
         }
