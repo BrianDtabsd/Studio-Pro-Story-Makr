@@ -91,7 +91,14 @@ const hasGeneratedAudio = (state: ProjectState): boolean =>
 
 const deriveResumeViewFromState = (state: ProjectState): ActiveView => {
   const preferred = state.lastEditorView || state.activeView;
-  if (preferred && preferred !== ActiveView.Hub) return preferred;
+  if (
+    preferred &&
+    preferred !== ActiveView.Hub &&
+    preferred !== ActiveView.TitleCardGenerator &&
+    preferred !== ActiveView.FreeformImageGenerator
+  ) {
+    return preferred;
+  }
   if (hasGeneratedVisuals(state) || Object.keys(state.simg_sceneImageDefinitions).length > 0) return ActiveView.SceneImages;
   if (hasGeneratedAudio(state) || Object.keys(state.analyzedScriptData).length > 0) return ActiveView.TextToSpeech;
   if (Object.keys(state.sw_generatedScripts).length > 0 || Object.keys(state.sw_scriptOutlines).length > 0) return ActiveView.ScriptWriter;
@@ -117,6 +124,12 @@ const deriveProjectIdentity = (state: ProjectState): { id: string; title: string
     title,
     description,
   };
+};
+
+const getStableProjectId = (state: ProjectState): string | undefined => {
+  if (state.projectId) return state.projectId;
+  const identity = deriveProjectIdentity(state);
+  return identity?.id;
 };
 
 const clearStaleGenerationFlags = (state: ProjectState): ProjectState => ({
@@ -165,7 +178,7 @@ const AppContent: React.FC = () => {
   const thumbnailUploadRunRef = useRef(0);
 
   const getActiveProjectId = (state: ProjectState): string | undefined =>
-    state.projectId || state.storyForScripting?.id;
+    getStableProjectId(state);
 
   // After sign-in: check for a pending checkout the user initiated from the landing page
   useEffect(() => {
@@ -278,11 +291,14 @@ const AppContent: React.FC = () => {
     const code = typeof (error as { code?: unknown })?.code === 'string'
       ? String((error as { code?: string }).code).toLowerCase()
       : '';
+    const message = error instanceof Error ? error.message.toLowerCase() : '';
     return (
       code.includes('unavailable') ||
       code.includes('deadline-exceeded') ||
       code.includes('aborted') ||
-      code.includes('internal')
+      code.includes('internal') ||
+      code.includes('resource-exhausted') ||
+      message.includes('quota')
     );
   };
 
@@ -699,7 +715,7 @@ const AppContent: React.FC = () => {
           onSceneImageDefinitionsChange={handleSceneImageDefinitionsChange}
           globalImageStylePrompt={projectState.simg_globalImageStylePrompt}
           onGlobalImageStylePromptChange={(s) => setProjectState(prev => ({ ...prev, simg_globalImageStylePrompt: s }))}
-          onNavigateToNextStep={() => setActiveView(ActiveView.ProjectExport)}
+          onNavigateToNextStep={() => setActiveView(ActiveView.ThumbnailMaker)}
           analyzedScripts={projectState.analyzedScriptData}
           onAnalyzedScriptsChange={(s) => setProjectState(prev => ({ ...prev, analyzedScriptData: s }))}
         />;
