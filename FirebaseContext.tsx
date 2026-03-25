@@ -78,6 +78,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setUser(firebaseUser);
 
       if (!firebaseUser) {
+        writesBlockedByQuotaRef.current = false;
+        setWritesBlockedByQuota(false);
         setProfile(null);
         setProjects([]);
         setLoading(false);

@@ -10,6 +10,10 @@ export type StoryMakrCallableKey =
   | 'generateVideoForPrompt';
 
 export type StoryMakrCallableNames = Record<StoryMakrCallableKey, string>;
+type CallableAliases = {
+  generateImage?: string;
+  generateVideo?: string;
+};
 
 // Backward-compatible aliases for existing imports.
 export type ChronosCallableKey = StoryMakrCallableKey;
@@ -50,6 +54,12 @@ const DEFAULT_STORYMAKR_CALLABLE_NAMES: StoryMakrCallableNames = {
   generateImageForPrompt: 'generateImage',
   generateVideoForPrompt: 'generateVideo',
 };
+const KNOWN_CALLABLE_KEYS: ReadonlySet<string> = new Set([
+  ...Object.keys(DEFAULT_STORYMAKR_CALLABLE_NAMES),
+  'generateImage',
+  'generateVideo',
+]);
+let didWarnUnknownCallableOverrideKeys = false;
 
 const parseMode = (raw: string | undefined, fallback: RuntimeMode): RuntimeMode => {
   if (!raw) return fallback;
@@ -141,15 +151,31 @@ const firstNonEmpty = (...values: Array<string | undefined>): string | undefined
 
 export const getStoryMakrCallableNames = (): StoryMakrCallableNames => {
   const config = getAppConfig();
-  const configuredRaw = config.STORYMAKR_AI_CALLABLE_NAMES || config.CHRONOS_CALLABLE_NAMES || {};
+  const configuredRaw =
+    (config.STORYMAKR_AI_CALLABLE_NAMES || config.CHRONOS_CALLABLE_NAMES || {}) as
+      Partial<StoryMakrCallableNames> & CallableAliases & Record<string, unknown>;
+  if (!didWarnUnknownCallableOverrideKeys) {
+    const unknownKeys = Object.keys(configuredRaw).filter((key) => !KNOWN_CALLABLE_KEYS.has(key));
+    if (unknownKeys.length > 0) {
+      console.warn(
+        `Ignoring unknown callable config key(s): ${unknownKeys.join(', ')}. ` +
+          'Supported keys: generateStoryIdeas, generateScript, analyzeScript, analyzeCharacterAvatar, generateSpeech, generateImageForPrompt, generateVideoForPrompt.'
+      );
+      didWarnUnknownCallableOverrideKeys = true;
+    }
+  }
   const normalizeCallableOverrides = (
-    overrides: Partial<StoryMakrCallableNames>
+    overrides: Partial<StoryMakrCallableNames> & CallableAliases
   ): Partial<StoryMakrCallableNames> => {
     const next: Partial<StoryMakrCallableNames> = {};
     (Object.keys(DEFAULT_STORYMAKR_CALLABLE_NAMES) as StoryMakrCallableKey[]).forEach((key) => {
       const normalized = normalizeConfigString(overrides[key]);
       if (normalized) next[key] = normalized;
     });
+    const imageAlias = normalizeConfigString(overrides.generateImage);
+    if (imageAlias) next.generateImageForPrompt = imageAlias;
+    const videoAlias = normalizeConfigString(overrides.generateVideo);
+    if (videoAlias) next.generateVideoForPrompt = videoAlias;
     return next;
   };
 

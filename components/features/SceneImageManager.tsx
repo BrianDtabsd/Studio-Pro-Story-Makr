@@ -194,7 +194,7 @@ export const SceneImageManager: React.FC<Props> = ({
                 <h3 className="text-sm font-bold text-neu-text-dark uppercase">Visual Assets Registry</h3>
                 <div className="flex items-center gap-4">
                     <input type="text" placeholder="Global Style (e.g. 8k photography)" value={globalImageStylePrompt} onChange={e => onGlobalImageStylePromptChange(e.target.value)} className="neu-pressed text-neu-text-dark text-xs p-2 rounded-lg w-48 focus:outline-none" />
-                    <ActionButton onClick={onNavigateToNextStep} className="py-2 px-6 text-xs">Step 5: Final Export</ActionButton>
+                    <ActionButton onClick={onNavigateToNextStep} className="py-2 px-6 text-xs">Step 5: Cover Art</ActionButton>
                 </div>
               </div>
               

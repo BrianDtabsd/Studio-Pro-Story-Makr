@@ -80,8 +80,13 @@ const readUrl = (data: unknown): string | null => {
   );
 };
 
-const call = <Req, Res>(key: StoryMakrCallableKey, timeout?: number) =>
-  makeCallable<Req, Res>(getCallableName(key), timeout ? { timeout } : undefined);
+const call = <Req, Res>(key: StoryMakrCallableKey, timeout?: number) => {
+  try {
+    return makeCallable<Req, Res>(getCallableName(key), timeout ? { timeout } : undefined);
+  } catch (error) {
+    throw new Error(`Callable initialization failed for "${key}". ${asMessage(error)}`.trim());
+  }
+};
 
 interface StoryIdeasResponse {
   ideas?: unknown;
