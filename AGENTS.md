@@ -66,10 +66,9 @@ Story Makr is a React 19 + TypeScript SPA built with Vite. It is a frontend-only
 - `npm run build` — runs `vite build` (production bundle).
 - There are no automated tests or test framework configured in this project.
 
-### Pre-existing code issues (as of March 2026)
-- `App.tsx` has duplicate `const` declarations (e.g. `createDefaultProSettings` appears twice), which cause both `npm run build` and the Vite dev server overlay to fail with "identifier already declared" errors.
-- `components/features/ProfileManager.tsx` has a JSX syntax error at line 337.
-- These must be fixed before the app renders or builds successfully.
+### First-time environment setup
+- Run `cp .env.example .env.local` and populate `GEMINI_API_KEY` (available as a Cursor Cloud secret / environment variable).
+- The `.env.local` file is gitignored and must be recreated per environment.
 
 ### CLI tools available
 - **Firebase CLI** (`firebase`) — installed globally via npm. Use for `firebase deploy`, `firebase emulators`, etc.
