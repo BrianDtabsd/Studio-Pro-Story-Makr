@@ -1,28 +1,12 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, deleteDoc, getDocFromServer } from 'firebase/firestore';
-import { getFunctions } from 'firebase/functions';
 import firebaseConfig from './firebase-applet-config.json';
 
-type FirebaseAppletConfig = {
-  projectId: string;
-  appId: string;
-  apiKey: string;
-  authDomain: string;
-  storageBucket: string;
-  messagingSenderId: string;
-  measurementId: string;
-  firestoreDatabaseId?: string;
-};
-
 // Initialize Firebase
-const appletConfig = firebaseConfig as FirebaseAppletConfig;
-const app = initializeApp(appletConfig);
+const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = appletConfig.firestoreDatabaseId
-  ? getFirestore(app, appletConfig.firestoreDatabaseId)
-  : getFirestore(app);
-export const functions = getFunctions(app, 'us-central1');
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const googleProvider = new GoogleAuthProvider();
 
 // Connection test

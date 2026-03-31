@@ -1,14 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { SectionCard } from '../SectionCard.tsx';
 import { ActionButton } from '../common/ActionButton.tsx';
 import { StoryIdea, SceneImageDefinition, TitleCardData, GeneratedImage, SynthesizedChunk, AIAnalyzedScript } from '../../types.ts';
 import JSZip from 'jszip';
 
-const sanitizeZipFilename = (value: string): string =>
-  value.trim().replace(/[^a-zA-Z0-9._-]/g, '_');
-
-const hasNonEmptyMediaUrl = (url: string | undefined): boolean =>
-  typeof url === 'string' && url.trim().length > 0;
 interface Props {
   story: StoryIdea | null;
   selectedEpisodes: StoryIdea[];
@@ -27,28 +22,65 @@ export const ProjectExport: React.FC<Props> = ({
 }) => {
   const [exporting, setExporting] = useState(false);
   const [playingIndex, setPlayingIndex] = useState<number | null>(null);
-  const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(selectedEpisodes[0]?.id || story?.id || null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(1);
+  const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(story?.id || null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  const activeStory =
-    selectedEpisodes.find((e) => e.id === activeEpisodeId) ||
-    selectedEpisodes[0] ||
-    story;
+  const activeStory = selectedEpisodes.find(e => e.id === activeEpisodeId) || story;
   const currentScript = activeStory ? (editableScripts[activeStory.id] || scripts[activeStory.id] || '') : '';
-  const currentScenes = activeStory ? (sceneImageDefinitions[activeStory.id] || []) : [];
-  const currentAudio = activeStory ? (audioChunks[activeStory.id] || []).filter((chunk) => hasNonEmptyMediaUrl(chunk.audioDataUrl)) : [];
+  
+  const currentScenes = useMemo(() => activeStory ? (sceneImageDefinitions[activeStory.id] || []) : [], [activeStory, sceneImageDefinitions]);
+  const currentAudio = useMemo(() => activeStory ? (audioChunks[activeStory.id] || []) : [], [activeStory, audioChunks]);
   const currentAnalyzed = activeStory ? analyzedScripts[activeStory.id] : null;
 
-  useEffect(() => {
-    setActiveEpisodeId((prev) => {
-      if (selectedEpisodes.length > 0) {
-        if (prev && selectedEpisodes.some((episode) => episode.id === prev)) return prev;
-        return selectedEpisodes[0].id;
+  const formatTime = (time: number) => {
+    if (isNaN(time) || !isFinite(time)) return '0:00';
+    const m = Math.floor(time / 60);
+    const s = Math.floor(time % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const time = Number(e.target.value);
+    setCurrentTime(time);
+    if (audioRef.current && audioRef.current.src) {
+      audioRef.current.currentTime = time;
+    }
+    if (videoRef.current) {
+      videoRef.current.currentTime = time % (videoRef.current.duration || 1);
+    }
+  };
+
+  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const vol = Number(e.target.value);
+    setVolume(vol);
+    if (audioRef.current) {
+      audioRef.current.volume = vol;
+    }
+  };
+
+  const handlePlayPause = () => {
+    if (playingIndex === null) {
+      handlePlayPreview();
+      return;
+    }
+    
+    if (audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause();
+        if (videoRef.current) videoRef.current.pause();
+        setIsPlaying(false);
+      } else {
+        audioRef.current.play().catch(console.error);
+        if (videoRef.current) videoRef.current.play().catch(console.error);
+        setIsPlaying(true);
       }
-      return story?.id || null;
-    });
-  }, [selectedEpisodes, story?.id]);
+    }
+  };
 
   const packageEpisode = async (zip: JSZip, episode: StoryIdea) => {
     const epFolder = zip.folder(episode.title.replace(/\s+/g, '_'));
@@ -63,16 +95,12 @@ export const ProjectExport: React.FC<Props> = ({
 
     for (const s of scenes) {
       if (s.generatedImageUrl) {
-        try {
-          const blob = await fetch(s.generatedImageUrl).then(r => r.blob());
-          imgFolder?.file(`scene_${s.sceneNumber}.jpg`, blob);
-        } catch (e) {
-          console.error(`Failed to fetch image for scene ${s.sceneNumber}`, e);
-        }
+        const imgData = s.generatedImageUrl.split(',')[1];
+        if (imgData) imgFolder?.file(`scene_${s.sceneNumber}.png`, imgData, { base64: true });
       }
       if (s.generatedVideoUrl) {
         try {
-          const vid = await fetch(s.generatedVideoUrl).then(r => r.blob());
+          const vid = await (await fetch(s.generatedVideoUrl)).blob();
           vidFolder?.file(`scene_${s.sceneNumber}.mp4`, vid);
         } catch (e) {
           console.error(`Failed to fetch video for scene ${s.sceneNumber}`, e);
@@ -83,13 +111,9 @@ export const ProjectExport: React.FC<Props> = ({
     const audio = audioChunks[episode.id] || [];
     const audioFolder = epFolder.folder("audio");
     for (const a of audio) {
-      if (hasNonEmptyMediaUrl(a.audioDataUrl)) {
-        try {
-          const blob = await fetch(a.audioDataUrl).then(r => r.blob());
-          audioFolder?.file(sanitizeZipFilename(a.downloadFilename), blob);
-        } catch (e) {
-          console.error(`Failed to fetch audio chunk ${a.downloadFilename}`, e);
-        }
+      if (a.audioDataUrl) {
+        const b64 = a.audioDataUrl.split(',')[1];
+        if (b64) audioFolder?.file(a.downloadFilename, b64, { base64: true });
       }
     }
   };
@@ -101,13 +125,9 @@ export const ProjectExport: React.FC<Props> = ({
       const zip = new JSZip();
       await packageEpisode(zip, activeStory);
       
-      if (thumbnail?.src) {
-        try {
-          const blob = await fetch(thumbnail.src).then(r => r.blob());
-          zip.file("thumbnail.jpg", blob);
-        } catch (e) {
-          console.error("Failed to fetch thumbnail", e);
-        }
+      if (thumbnail) {
+        const thumbData = thumbnail.src.split(',')[1];
+        if (thumbData) zip.file("thumbnail.png", thumbData, { base64: true });
       }
 
       const blob = await zip.generateAsync({ type: "blob" });
@@ -132,13 +152,9 @@ export const ProjectExport: React.FC<Props> = ({
         await packageEpisode(zip, ep);
       }
       
-      if (thumbnail?.src) {
-        try {
-          const blob = await fetch(thumbnail.src).then(r => r.blob());
-          zip.file("thumbnail.jpg", blob);
-        } catch (e) {
-          console.error("Failed to fetch thumbnail", e);
-        }
+      if (thumbnail) {
+        const thumbData = thumbnail.src.split(',')[1];
+        if (thumbData) zip.file("thumbnail.png", thumbData, { base64: true });
       }
 
       const blob = await zip.generateAsync({ type: "blob" });
@@ -170,23 +186,34 @@ export const ProjectExport: React.FC<Props> = ({
   useEffect(() => {
     if (playingIndex !== null && playingIndex < currentScenes.length) {
       const scene = currentScenes[playingIndex];
-      const audioChunk = currentAudio.find(a => a.sceneNumbers.includes(scene.sceneNumber));
+      if (!scene) return;
+      const audioChunk = currentAudio.find(a => a.sceneNumbers?.includes(scene.sceneNumber));
       
-      if (audioChunk && hasNonEmptyMediaUrl(audioChunk.audioDataUrl) && audioRef.current) {
+      if (audioChunk && audioRef.current) {
         audioRef.current.src = audioChunk.audioDataUrl;
-        audioRef.current.play().catch(console.error);
-        
-        audioRef.current.onended = () => {
-          setPlayingIndex(playingIndex + 1);
-        };
+        audioRef.current.volume = volume;
+        audioRef.current.play().then(() => setIsPlaying(true)).catch(console.error);
       } else {
+        if (audioRef.current) {
+          audioRef.current.pause();
+          audioRef.current.src = '';
+        }
         const timer = setTimeout(() => {
           setPlayingIndex(playingIndex + 1);
         }, 4000);
+        setDuration(4);
+        setCurrentTime(0);
+        setIsPlaying(true);
         return () => clearTimeout(timer);
       }
     } else if (playingIndex !== null && playingIndex >= currentScenes.length) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+      }
       setPlayingIndex(null);
+      setIsPlaying(false);
+      setCurrentTime(0);
     }
   }, [playingIndex, currentScenes, currentAudio]);
 
@@ -238,7 +265,7 @@ export const ProjectExport: React.FC<Props> = ({
                     {currentScene.generatedVideoUrl ? (
                       <video 
                         ref={videoRef}
-                        src={currentScene.generatedVideoUrl} 
+                        src={currentScene.generatedVideoUrl || undefined} 
                         className="w-full h-full object-cover"
                         autoPlay 
                         loop 
@@ -247,7 +274,7 @@ export const ProjectExport: React.FC<Props> = ({
                       />
                     ) : currentScene.generatedImageUrl ? (
                       <img 
-                        src={currentScene.generatedImageUrl} 
+                        src={currentScene.generatedImageUrl || undefined} 
                         alt={`Scene ${currentScene.sceneNumber}`} 
                         className="w-full h-full object-cover"
                       />
@@ -263,7 +290,7 @@ export const ProjectExport: React.FC<Props> = ({
                       </p>
                       {currentAnalyzed && (
                         <p className="text-white/80 text-sm mt-1 drop-shadow-md line-clamp-2">
-                          {currentAnalyzed.scenes.find(s => s.sceneNumber === currentScene.sceneNumber)?.dialogue.map(d => `${d.speaker}: ${d.text}`).join(' ')}
+                          {currentAnalyzed.scenes?.find(s => s.sceneNumber === currentScene.sceneNumber)?.dialogue?.map(d => `${d.speaker}: ${d.text}`)?.join(' ')}
                         </p>
                       )}
                     </div>
@@ -273,19 +300,73 @@ export const ProjectExport: React.FC<Props> = ({
                     Ready to Play
                   </div>
                 )}
-                <audio ref={audioRef} className="hidden" />
+                <audio 
+                  ref={audioRef} 
+                  className="hidden" 
+                  onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+                  onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
+                  onEnded={() => setPlayingIndex(prev => prev !== null ? prev + 1 : null)}
+                />
               </div>
 
-              <div className="flex gap-4">
-                {playingIndex === null ? (
-                  <ActionButton onClick={handlePlayPreview} className="px-8 py-3 bg-accent-orange text-white">
-                    ▶ Play Preview
-                  </ActionButton>
-                ) : (
-                  <ActionButton onClick={handleStopPreview} className="px-8 py-3 bg-red-500 text-white">
-                    ⏹ Stop Playback
-                  </ActionButton>
-                )}
+              <div className="flex flex-col w-full gap-4 mt-4 bg-neu-base p-4 rounded-xl border-2 border-neu-border">
+                <div className="flex items-center gap-4">
+                  <button 
+                    onClick={handlePlayPause}
+                    className="w-12 h-12 flex items-center justify-center bg-accent-orange text-white rounded-full hover:scale-105 transition-transform text-xl"
+                  >
+                    {isPlaying ? '⏸' : '▶'}
+                  </button>
+                  
+                  <div className="flex-1 flex flex-col gap-1">
+                    <div className="flex justify-between text-xs text-neu-text-dark font-bold font-mono">
+                      <span>{formatTime(currentTime)}</span>
+                      <span>{formatTime(duration)}</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min={0} 
+                      max={duration || 100} 
+                      step={0.1}
+                      value={currentTime} 
+                      onChange={handleSeek}
+                      className="w-full accent-accent-orange"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 w-32">
+                    <span className="text-neu-text-dark text-lg">🔊</span>
+                    <input 
+                      type="range" 
+                      min={0} 
+                      max={1} 
+                      step={0.01}
+                      value={volume} 
+                      onChange={handleVolumeChange}
+                      className="w-full accent-accent-orange"
+                    />
+                  </div>
+                </div>
+                
+                <div className="flex justify-between items-center">
+                  <button 
+                    onClick={() => setPlayingIndex(prev => prev !== null ? Math.max(0, prev - 1) : 0)}
+                    disabled={playingIndex === null || playingIndex === 0}
+                    className="text-xs font-bold text-neu-text-dark uppercase hover:text-accent-orange disabled:opacity-50"
+                  >
+                    ⏮ Previous Scene
+                  </button>
+                  <span className="text-xs font-bold text-neu-text uppercase">
+                    Scene {playingIndex !== null ? playingIndex + 1 : 0} of {currentScenes.length}
+                  </span>
+                  <button 
+                    onClick={() => setPlayingIndex(prev => prev !== null ? Math.min(currentScenes.length - 1, prev + 1) : 0)}
+                    disabled={playingIndex === null || playingIndex === currentScenes.length - 1}
+                    className="text-xs font-bold text-neu-text-dark uppercase hover:text-accent-orange disabled:opacity-50"
+                  >
+                    Next Scene ⏭
+                  </button>
+                </div>
               </div>
             </div>
           </SectionCard>

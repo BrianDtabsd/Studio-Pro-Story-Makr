@@ -1,15 +1,6 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { auth, signInWithPopup, googleProvider, onAuthStateChanged, getDoc, setDoc, query, onSnapshot, deleteDoc, User } from './firebase';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { auth, db, signInWithPopup, googleProvider, onAuthStateChanged, doc, getDoc, setDoc, collection, query, onSnapshot, deleteDoc, User } from './firebase';
 import { UserProfile, Project } from './types';
-import { deleteProjectAssets } from './services/storageService';
-import {
-  toUserProfile,
-  toUserProfileDoc,
-  toUserProfileUpdate,
-  userProfileDocRef,
-  userProjectDocRef,
-  userProjectsCollectionRef,
-} from './services/firebaseCollections.ts';
 
 interface FirebaseContextType {
   user: User | null;
@@ -20,7 +11,6 @@ interface FirebaseContextType {
   signOut: () => Promise<void>;
   saveProject: (project: Project) => Promise<void>;
   deleteProject: (projectId: string) => Promise<void>;
-  updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
   upgradeToPro: () => Promise<void>;
 }
 
@@ -31,124 +21,52 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [writesBlockedByQuota, setWritesBlockedByQuota] = useState(false);
-  const writesBlockedByQuotaRef = useRef(false);
-
-  const isQuotaExceededError = (error: unknown): boolean => {
-    const code = typeof (error as { code?: unknown })?.code === 'string'
-      ? String((error as { code?: string }).code).toLowerCase()
-      : '';
-    const message = error instanceof Error ? error.message.toLowerCase() : '';
-    return code.includes('resource-exhausted') || message.includes('quota');
-  };
-
-  const markWritesBlockedByQuota = () => {
-    if (!writesBlockedByQuotaRef.current) {
-      writesBlockedByQuotaRef.current = true;
-      setWritesBlockedByQuota(true);
-      console.warn('Firestore writes paused for this session: quota exhausted.');
-    }
-  };
 
   useEffect(() => {
-    writesBlockedByQuotaRef.current = writesBlockedByQuota;
-  }, [writesBlockedByQuota]);
-
-  useEffect(() => {
-    let unsubscribeProfile: (() => void) | null = null;
     let unsubscribeProjects: (() => void) | null = null;
-    let authEventId = 0;
-    let warnedProjectsPermission = false;
-
-    const clearUserListeners = () => {
-      if (unsubscribeProfile) {
-        unsubscribeProfile();
-        unsubscribeProfile = null;
-      }
-      if (unsubscribeProjects) {
-        unsubscribeProjects();
-        unsubscribeProjects = null;
-      }
-    };
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      authEventId += 1;
-      const eventId = authEventId;
-      clearUserListeners();
       setUser(firebaseUser);
-
-      if (!firebaseUser) {
-        writesBlockedByQuotaRef.current = false;
-        setWritesBlockedByQuota(false);
-        setProfile(null);
-        setProjects([]);
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-      try {
-        const profileRef = userProfileDocRef(firebaseUser.uid);
-        const userDoc = await getDoc(profileRef);
-        if (eventId !== authEventId) return;
-
+      if (firebaseUser) {
+        // Fetch or create profile
+        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
         if (userDoc.exists()) {
-          setProfile(toUserProfile(userDoc.data()));
+          setProfile(userDoc.data() as UserProfile);
         } else {
           const newProfile: UserProfile = {
             username: firebaseUser.displayName || 'Anonymous',
             avatarSeed: Math.random().toString(36).substring(7),
             joinedDate: Date.now(),
-            isPro: false
+            isPro: localStorage.getItem('story_makr_force_pro') === 'true'
           };
-          // Do not auto-create profile docs on sign-in. This avoids background
-          // writes before the user explicitly saves any changes.
-          if (eventId !== authEventId) return;
+          await setDoc(doc(db, 'users', firebaseUser.uid), newProfile);
           setProfile(newProfile);
         }
 
-        // Real-time listener on user doc — updates profile instantly when
-        // the Stripe webhook writes plan: 'pro' to Firestore.
-        unsubscribeProfile = onSnapshot(profileRef, (snap) => {
-          if (snap.exists()) {
-            setProfile(toUserProfile(snap.data()));
-          } else {
-            setProfile(null);
-          }
-        });
-
         // Listen for projects
-        const q = query(userProjectsCollectionRef(firebaseUser.uid));
+        const q = query(collection(db, 'users', firebaseUser.uid, 'projects'));
+        if (unsubscribeProjects) unsubscribeProjects();
         unsubscribeProjects = onSnapshot(q, (snapshot) => {
-          const projectList = snapshot.docs.map(projectDoc => projectDoc.data());
+          const projectList = snapshot.docs.map(doc => doc.data() as Project);
           setProjects(projectList.sort((a, b) => b.lastModified - a.lastModified));
         }, (error) => {
           console.error("Firestore Error (LIST projects):", error);
-          const code = typeof (error as { code?: unknown })?.code === 'string'
-            ? String((error as { code?: string }).code).toLowerCase()
-            : '';
-          if (code.includes('permission-denied') && !warnedProjectsPermission) {
-            warnedProjectsPermission = true;
-            console.error(
-              "Projects read denied by Firestore rules. Confirm this signed-in UID can read users/{uid}/projects in the deployed ruleset/database."
-            );
-          }
         });
-      } catch (error) {
-        console.error("Auth bootstrap error:", error);
-        if (eventId === authEventId) {
-          setProfile(null);
-          setProjects([]);
+
+      } else {
+        if (unsubscribeProjects) {
+          unsubscribeProjects();
+          unsubscribeProjects = null;
         }
-      } finally {
-        if (eventId === authEventId) setLoading(false);
+        setProfile(null);
+        setProjects([]);
       }
+      setLoading(false);
     });
 
     return () => {
-      authEventId += 1;
-      clearUserListeners();
       unsubscribe();
+      if (unsubscribeProjects) unsubscribeProjects();
     };
   }, []);
 
@@ -163,61 +81,46 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const signOutUser = async () => {
     try {
       await auth.signOut();
-
+      localStorage.removeItem('story_makr_force_pro');
     } catch (error) {
       console.error("Sign out error:", error);
     }
   };
 
   const saveProject = async (project: Project) => {
-    if (!user) throw new Error('You must be signed in to save projects.');
-    if (writesBlockedByQuotaRef.current) {
-      const quotaError = new Error('Firestore write quota exhausted for this session.');
-      (quotaError as Error & { code?: string }).code = 'resource-exhausted';
-      throw quotaError;
-    }
+    if (!user) return;
     try {
-      await setDoc(userProjectDocRef(user.uid, project.id), project);
+      await setDoc(doc(db, 'users', user.uid, 'projects', project.id), project);
     } catch (error) {
-      if (isQuotaExceededError(error)) markWritesBlockedByQuota();
       console.error("Firestore Error (SAVE project):", error);
-      throw error;
     }
   };
 
   const deleteProject = async (projectId: string) => {
     if (!user) return;
-    if (writesBlockedByQuotaRef.current) return;
     try {
-      // Best-effort Storage cleanup — never blocks project deletion if it fails
-      await deleteProjectAssets(user.uid, projectId).catch(() => {});
-      await deleteDoc(userProjectDocRef(user.uid, projectId));
+      await deleteDoc(doc(db, 'users', user.uid, 'projects', projectId));
     } catch (error) {
-      if (isQuotaExceededError(error)) markWritesBlockedByQuota();
       console.error("Firestore Error (DELETE project):", error);
     }
   };
 
-  const updateProfile = async (updates: Partial<UserProfile>) => {
-    if (!user) return;
-    if (writesBlockedByQuotaRef.current) return;
+  const upgradeToPro = async () => {
+    if (!user || !profile) return;
     try {
-      await setDoc(userProfileDocRef(user.uid), toUserProfileUpdate(updates), { merge: true });
-      // onSnapshot listener on the user doc will pick up the change automatically.
+      const updatedProfile = { ...profile, isPro: true };
+      await setDoc(doc(db, 'users', user.uid), updatedProfile);
+      setProfile(updatedProfile);
+      localStorage.setItem('story_makr_force_pro', 'true');
     } catch (error) {
-      if (isQuotaExceededError(error)) markWritesBlockedByQuota();
-      console.error("Firestore Error (UPDATE profile):", error);
+      console.error("Firestore Error (UPGRADE profile):", error);
     }
   };
-
-  // Upgrade is handled via Stripe checkout — see CheckoutModal in App.tsx.
-  // This stub keeps the context interface stable.
-  const upgradeToPro = async () => {};
 
   return (
     <FirebaseContext.Provider value={{ 
       user, profile, projects, loading, 
-      signIn, signOut: signOutUser, saveProject, deleteProject, updateProfile, upgradeToPro
+      signIn, signOut: signOutUser, saveProject, deleteProject, upgradeToPro 
     }}>
       {children}
     </FirebaseContext.Provider>

@@ -1,21 +1,13 @@
 
 import React, { useState } from 'react';
-import { generateStoryIdeas, generateImageForPrompt, analyzeCharacterAvatar } from '../../services/geminiService.ts';
+import { generateStoryIdeas } from '../../services/geminiService.ts';
 import { ActionButton } from '../common/ActionButton.tsx';
 import { TextAreaInput } from '../common/TextAreaInput.tsx';
 import { SectionCard } from '../SectionCard.tsx';
 import { LoadingSpinner } from '../LoadingSpinner.tsx';
 import { ErrorDisplay } from '../ErrorDisplay.tsx';
-import {
-  STORY_IDEAS_PLACEHOLDER,
-  PRESET_VOICE_KEYS_ORDERED,
-  PRESET_VOICES_CONFIG,
-  DEFAULT_SCRIPT_DURATION_MAX_MINUTES,
-  DEFAULT_SCRIPT_DURATION_MINUTES,
-  PRO_SCRIPT_DURATION_MAX_BOUND,
-  PRO_SCRIPT_DURATION_MIN_BOUND,
-} from '../../constants.ts';
-import { StoryIdea, VIDEO_GENRES, VideoGenreId, ProStorySettings, STORY_SUB_GENRES, CharacterDefinition, CharacterVoicePreset, PresetVoiceKey, ContentStyle, PodcastFormat, StorySubGenreId } from '../../types.ts';
+import { STORY_IDEAS_PLACEHOLDER } from '../../constants.ts';
+import { StoryIdea, VIDEO_GENRES, VideoGenreId, ProStorySettings, STORY_SUB_GENRES, CharacterDefinition, ContentStyle, PodcastFormat } from '../../types.ts';
 
 interface Props {
   onIdeasGenerated: (k: string, i: StoryIdea[]) => void;
@@ -26,44 +18,14 @@ interface Props {
   setSelectedIdeaIds: (ids: string[] | ((prev: string[]) => string[])) => void;
   isProUser: boolean;
   proSettings: ProStorySettings;
-  onProSettingsChange: React.Dispatch<React.SetStateAction<ProStorySettings>>;
-  onCharacterVoicePresetsChange: React.Dispatch<React.SetStateAction<Record<string, CharacterVoicePreset>>>;
+  onProSettingsChange: (s: any) => void;
+  onCharacterVoicePresetsChange: (u: any) => void;
 }
 
 export const StoryIdeaGenerator: React.FC<Props> = ({ 
   onIdeasGenerated, onProceedToScripting, currentKeywords, currentIdeas, selectedIdeaIds, setSelectedIdeaIds,
   isProUser, proSettings, onProSettingsChange, onCharacterVoicePresetsChange
 }) => {
-  const clampDurationMinutes = (value: number): number =>
-    Math.max(PRO_SCRIPT_DURATION_MIN_BOUND, Math.min(PRO_SCRIPT_DURATION_MAX_BOUND, value));
-
-  const resolveDurationRange = (minValue: number | undefined, maxValue: number | undefined) => {
-    const safeMin = clampDurationMinutes(
-      Number.isFinite(minValue) ? Number(minValue) : DEFAULT_SCRIPT_DURATION_MINUTES
-    );
-    const safeMax = clampDurationMinutes(
-      Number.isFinite(maxValue) ? Number(maxValue) : DEFAULT_SCRIPT_DURATION_MAX_MINUTES
-    );
-    return {
-      min: Math.min(safeMin, safeMax),
-      max: Math.max(safeMin, safeMax),
-    };
-  };
-
-  const durationRange = resolveDurationRange(
-    proSettings.scriptDurationMinMinutes,
-    proSettings.scriptDurationMaxMinutes
-  );
-
-  const updateDurationRange = (nextMin: number, nextMax: number) => {
-    const resolved = resolveDurationRange(nextMin, nextMax);
-    onProSettingsChange((prev) => ({
-      ...prev,
-      scriptDurationMinMinutes: resolved.min,
-      scriptDurationMaxMinutes: resolved.max,
-    }));
-  };
-
   const [keywords, setKeywords] = useState(currentKeywords);
   const [targetAudience, setTargetAudience] = useState('Everyone');
   const [medium, setMedium] = useState('Live Action');
@@ -71,6 +33,7 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
   const [variationCount, setVariationCount] = useState<5 | 10>(5);
   const [sourceLink, setSourceLink] = useState('');
   const [sourceFileName, setSourceFileName] = useState('');
+  const [mediaData, setMediaData] = useState<{mimeType: string, data: string} | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,33 +41,36 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
   const proAudiences = ['Adults (18+)'];
   const mediums = ['Live Action', 'Animation'];
   const proMediums = ['Live Action (Indie)', 'Puppets', 'Claymation', 'Stop Motion'];
-  const audienceSubGenreMap: Record<string, StorySubGenreId> = {
-    Kids: 'general',
-    Everyone: 'general',
-    Teens: 'drama',
-    'Adults (18+)': 'mystery',
-  };
 
   const handleAddChar = () => {
     const c: CharacterDefinition = { id: `c-${Date.now()}`, name: '', gender: 'Other', personality: '', physicalDescription: '', relationalStatus: '', voicePresetKey: 'Narrator_F' };
-    onProSettingsChange((prev) => ({ ...prev, characters: [...prev.characters, c] }));
+    onProSettingsChange((prev: any) => ({ ...prev, characters: [...prev.characters, c] }));
   };
 
-  const handleCharChange = <K extends keyof CharacterDefinition>(id: string, field: K, val: CharacterDefinition[K]) => {
-    onProSettingsChange((prev) => ({
+  const handleCharChange = (id: string, field: string, val: any) => {
+    onProSettingsChange((prev: any) => ({
       ...prev,
-      characters: prev.characters.map((c) => c.id === id ? { ...c, [field]: val } : c)
+      characters: prev.characters.map((c: any) => c.id === id ? { ...c, [field]: val } : c)
     }));
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setSourceFileName(e.target.files[0].name);
+      const file = e.target.files[0];
+      setSourceFileName(file.name);
+      
+      // Read the file as base64 to send to Gemini
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = (reader.result as string).split(',')[1];
+        setMediaData({ mimeType: file.type, data: base64String });
+      };
+      reader.readAsDataURL(file);
     }
   };
 
   const toggleTopic = (topicId: VideoGenreId) => {
-    onProSettingsChange((prev) => {
+    onProSettingsChange((prev: any) => {
       const topics = prev.topics || [];
       if (topics.includes(topicId)) {
         return { ...prev, topics: topics.filter((t: VideoGenreId) => t !== topicId) };
@@ -127,12 +93,13 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
         `${fullKeywords} | Audience: ${targetAudience} | Visual Style: ${medium} | Format: ${format}`, 
         proSettings.topics || [], 
         format, 
-        { ...proSettings, subGenre: audienceSubGenreMap[targetAudience] || 'general' },
-        variationCount
+        { ...proSettings, subGenre: targetAudience as any }, // Pass audience as subGenre for tone
+        variationCount,
+        mediaData || undefined
       );
       onIdeasGenerated(keywords, ideas);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Story idea generation failed.');
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -176,7 +143,7 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
                 <button 
                   key={pf}
                   type="button"
-                  onClick={() => onProSettingsChange((prev) => ({ ...prev, podcastFormat: prev.podcastFormat === pf ? undefined : pf }))}
+                  onClick={() => onProSettingsChange((prev: any) => ({ ...prev, podcastFormat: prev.podcastFormat === pf ? undefined : pf }))}
                   className={`neu-btn px-4 py-2 text-xs font-medium ${proSettings.podcastFormat === pf ? 'neu-active-orange text-neu-text-dark' : 'text-neu-text'}`}
                 >
                   {pf}
@@ -194,70 +161,13 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
               <button 
                 key={style}
                 type="button"
-                onClick={() => onProSettingsChange((prev) => ({ ...prev, contentStyle: style }))}
+                onClick={() => onProSettingsChange((prev: any) => ({ ...prev, contentStyle: style }))}
                 className={`neu-btn px-4 py-2 text-xs font-medium ${proSettings.contentStyle === style ? 'neu-active-orange text-neu-text-dark' : 'text-neu-text'}`}
               >
                 {style}
               </button>
             ))}
           </div>
-        </div>
-
-        <div>
-          <h3 className="text-sm font-bold text-neu-text-dark mb-3">Target Script Duration</h3>
-          {isProUser ? (
-            <div className="neu-pressed p-4 rounded-xl space-y-3">
-              <p className="text-[10px] text-neu-text uppercase tracking-widest font-bold">
-                Pro Range: {PRO_SCRIPT_DURATION_MIN_BOUND}-{PRO_SCRIPT_DURATION_MAX_BOUND} minutes
-              </p>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="text-[10px] font-bold text-neu-text-dark uppercase tracking-widest">
-                  Min
-                  <input
-                    type="number"
-                    min={PRO_SCRIPT_DURATION_MIN_BOUND}
-                    max={PRO_SCRIPT_DURATION_MAX_BOUND}
-                    value={durationRange.min}
-                    onChange={(e) => {
-                      const next = Number(e.target.value);
-                      if (Number.isFinite(next)) updateDurationRange(next, durationRange.max);
-                    }}
-                    className="mt-2 w-full neu-flat px-3 py-2 text-sm text-neu-text-dark focus:outline-none"
-                    aria-label="Minimum script duration in minutes"
-                    title="Minimum script duration in minutes"
-                  />
-                </label>
-                <label className="text-[10px] font-bold text-neu-text-dark uppercase tracking-widest">
-                  Max
-                  <input
-                    type="number"
-                    min={PRO_SCRIPT_DURATION_MIN_BOUND}
-                    max={PRO_SCRIPT_DURATION_MAX_BOUND}
-                    value={durationRange.max}
-                    onChange={(e) => {
-                      const next = Number(e.target.value);
-                      if (Number.isFinite(next)) updateDurationRange(durationRange.min, next);
-                    }}
-                    className="mt-2 w-full neu-flat px-3 py-2 text-sm text-neu-text-dark focus:outline-none"
-                    aria-label="Maximum script duration in minutes"
-                    title="Maximum script duration in minutes"
-                  />
-                </label>
-              </div>
-              <p className="text-[10px] text-neu-text">
-                Applied during script generation as a guidance target.
-              </p>
-            </div>
-          ) : (
-            <div className="neu-pressed p-4 rounded-xl">
-              <p className="text-xs font-bold text-neu-text-dark uppercase tracking-widest">
-                Default: {DEFAULT_SCRIPT_DURATION_MINUTES}-{DEFAULT_SCRIPT_DURATION_MAX_MINUTES} minutes
-              </p>
-              <p className="text-[10px] text-neu-text mt-2">
-                Upgrade to Pro to tune duration range.
-              </p>
-            </div>
-          )}
         </div>
 
         {/* Topics Dropdown */}
@@ -268,8 +178,6 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
               onChange={(e) => toggleTopic(e.target.value as VideoGenreId)}
               className="neu-pressed px-4 py-2 text-xs font-medium text-neu-text focus:outline-none w-full"
               value=""
-              aria-label="Add topics"
-              title="Add topics"
             >
               <option value="" disabled>Add topics...</option>
               {VIDEO_GENRES.map(g => (
@@ -296,17 +204,24 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
           <div className="flex flex-wrap gap-3">
             <button 
               type="button"
-              onClick={() => onProSettingsChange((prev) => ({ ...prev, characterCount: 1 }))}
+              onClick={() => onProSettingsChange((prev: any) => ({ ...prev, characterCount: 1 }))}
               className={`neu-btn px-4 py-2 text-xs font-medium ${proSettings.characterCount === 1 ? 'neu-active-orange text-neu-text-dark' : 'text-neu-text'}`}
             >
               1 Character / Narrator
             </button>
             <button 
               type="button"
-              onClick={() => onProSettingsChange((prev) => ({ ...prev, characterCount: 2 }))}
+              onClick={() => onProSettingsChange((prev: any) => ({ ...prev, characterCount: 2 }))}
               className={`neu-btn px-4 py-2 text-xs font-medium ${proSettings.characterCount === 2 ? 'neu-active-orange text-neu-text-dark' : 'text-neu-text'}`}
             >
               2 Characters / Interview
+            </button>
+            <button 
+              type="button"
+              onClick={() => onProSettingsChange((prev: any) => ({ ...prev, characterCount: 3 }))}
+              className={`neu-btn px-4 py-2 text-xs font-medium ${proSettings.characterCount === 3 ? 'neu-active-orange text-neu-text-dark' : 'text-neu-text'}`}
+            >
+              3+ Characters / Ensemble
             </button>
           </div>
         </div>
@@ -399,10 +314,51 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
       {/* Center Column - Story Seed */}
       <section className="lg:col-span-6 flex flex-col gap-6">
         <div className="neu-flat p-8 flex-grow flex flex-col">
+          
+          <div className="mb-6">
+            <label className="block text-sm font-bold text-neu-text-dark mb-2">Location & Time Period</label>
+            <div className="neu-pressed p-3">
+              <textarea 
+                className="w-full bg-transparent border-0 resize-none focus:ring-0 text-neu-text-dark text-sm" 
+                rows={2}
+                placeholder="Where and when does this take place?"
+                value={proSettings.primarySetting}
+                onChange={e => onProSettingsChange((prev: any) => ({ ...prev, primarySetting: e.target.value }))}
+              ></textarea>
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <div className="flex justify-between items-center mb-2">
+              <label className="text-sm font-bold text-neu-text-dark">Main Characters</label>
+              <button type="button" onClick={handleAddChar} className="neu-btn px-3 py-1 text-xs font-bold text-accent-orange">+</button>
+            </div>
+            <p className="text-[10px] text-neu-text mb-3">Add specific characters to include in the story.</p>
+            <div className="space-y-3 max-h-[200px] overflow-y-auto pr-2">
+              {proSettings.characters.map(c => (
+                <div key={c.id} className="neu-pressed p-3 flex flex-col gap-2 relative">
+                  <button type="button" onClick={() => onProSettingsChange((prev: any) => ({ ...prev, characters: prev.characters.filter((x:any) => x.id !== c.id) }))} className="absolute top-2 right-2 text-red-500 text-xs font-bold">X</button>
+                  <input 
+                    placeholder="Character Name" 
+                    value={c.name} 
+                    onChange={e => handleCharChange(c.id, 'name', e.target.value)} 
+                    className="bg-transparent border-b border-gray-300 p-1 text-sm font-bold text-neu-text-dark focus:outline-none" 
+                  />
+                  <input 
+                    placeholder="Personality & Traits" 
+                    value={c.physicalDescription} 
+                    onChange={e => handleCharChange(c.id, 'physicalDescription', e.target.value)} 
+                    className="bg-transparent border-b border-gray-300 p-1 text-xs text-neu-text focus:outline-none" 
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
           <h2 className="text-lg font-bold text-neu-text-dark uppercase tracking-wide text-center mb-1">Your Core Concept</h2>
           <p className="text-xs font-bold text-neu-text mb-2 text-center">What do you want to make a video about?</p>
           
-          <div className="neu-pressed p-6 flex-grow mb-6 min-h-[240px]">
+          <div className="neu-pressed p-6 flex-grow mb-6 min-h-[160px]">
             <textarea 
               className="w-full h-full bg-transparent border-0 resize-none focus:ring-0 text-neu-text-dark leading-relaxed" 
               placeholder="e.g., A detective who can talk to ghosts solves a mystery in a futuristic city..."
@@ -487,14 +443,7 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
                   >
                     <div className="flex justify-between items-center">
                       <span className="text-[10px] font-bold text-accent-orange uppercase">Episode</span>
-                      <input
-                        type="checkbox"
-                        checked={selectedIdeaIds.includes(ep.id)}
-                        readOnly
-                        aria-label={`Select episode ${ep.title}`}
-                        title={`Select episode ${ep.title}`}
-                        className="w-4 h-4 rounded text-accent-orange"
-                      />
+                      <input type="checkbox" checked={selectedIdeaIds.includes(ep.id)} readOnly className="w-4 h-4 rounded text-accent-orange" />
                     </div>
                     <h4 className="text-sm font-bold text-neu-text-dark line-clamp-1">{ep.title}</h4>
                     <p className="text-xs text-neu-text line-clamp-2">{ep.description}</p>
@@ -508,8 +457,8 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
             <>
               {/* Source Material Uploader */}
               <div>
-                <label className="block text-sm font-bold text-neu-text-dark mb-2">Reference Material</label>
-                <p className="text-[10px] text-neu-text mb-3">Paste a link or upload a file if you are making a React, Review, or Recap video.</p>
+                <label className="block text-sm font-bold text-neu-text-dark mb-2">Review, Recap, or Reaction</label>
+                <p className="text-[10px] text-neu-text mb-3">Upload a video and the app will return a podcast or video VoiceOver of a review, recap, or reaction to the uploaded content.</p>
                 <div className="space-y-3">
                   <input 
                     type="text" 
@@ -523,54 +472,12 @@ export const StoryIdeaGenerator: React.FC<Props> = ({
                       type="file" 
                       accept="video/*,audio/*"
                       onChange={handleFileUpload}
-                      title="Upload Video or Audio File"
-                      aria-label="Upload Video or Audio File"
                       className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                     />
                     <div className="neu-btn w-full py-2 text-xs font-bold text-neu-text text-center">
                       {sourceFileName ? sourceFileName : 'Upload Video/Audio File'}
                     </div>
                   </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold text-neu-text-dark mb-2">Location & Time Period</label>
-                <div className="neu-pressed p-3">
-                  <textarea 
-                    className="w-full bg-transparent border-0 resize-none focus:ring-0 text-neu-text-dark text-sm" 
-                    rows={3}
-                    placeholder="Where and when does this take place?"
-                    value={proSettings.primarySetting}
-                    onChange={e => onProSettingsChange((prev) => ({ ...prev, primarySetting: e.target.value }))}
-                  ></textarea>
-                </div>
-              </div>
-
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <label className="text-sm font-bold text-neu-text-dark">Main Characters</label>
-                  <button type="button" onClick={handleAddChar} className="neu-btn px-3 py-1 text-xs font-bold text-accent-orange">+</button>
-                </div>
-                <p className="text-[10px] text-neu-text mb-3">Add specific characters to include in the story.</p>
-                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
-                  {proSettings.characters.map(c => (
-                    <div key={c.id} className="neu-pressed p-3 flex flex-col gap-2 relative">
-                      <button type="button" onClick={() => onProSettingsChange((prev) => ({ ...prev, characters: prev.characters.filter((x) => x.id !== c.id) }))} className="absolute top-2 right-2 text-red-500 text-xs font-bold">X</button>
-                      <input 
-                        placeholder="Character Name" 
-                        value={c.name} 
-                        onChange={e => handleCharChange(c.id, 'name', e.target.value)} 
-                        className="bg-transparent border-b border-gray-300 p-1 text-sm font-bold text-neu-text-dark focus:outline-none" 
-                      />
-                      <input 
-                        placeholder="Personality & Traits" 
-                        value={c.physicalDescription} 
-                        onChange={e => handleCharChange(c.id, 'physicalDescription', e.target.value)} 
-                        className="bg-transparent border-b border-gray-300 p-1 text-xs text-neu-text focus:outline-none" 
-                      />
-                    </div>
-                  ))}
                 </div>
               </div>
             </>

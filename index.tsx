@@ -1,5 +1,4 @@
 
-import './firebase'; // Must be first — initializes Firebase before any service module evaluates
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.tsx';

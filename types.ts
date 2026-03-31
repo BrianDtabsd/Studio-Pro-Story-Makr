@@ -22,9 +22,6 @@ export enum ProductionProtocol {
 export interface UserProfile {
   username: string;
   avatarSeed: string;
-  avatarChoice?: string; // 'initials' | 'preset-0'..'preset-9' | https:// Storage URL
-  bio?: string;
-  defaultContentStyle?: ContentStyle;
   joinedDate: number;
   isPro?: boolean;
 }
@@ -40,9 +37,7 @@ export interface Project {
 }
 
 export interface ProjectState {
-  projectId?: string;
   activeView: ActiveView;
-  lastEditorView?: ActiveView;
   storyIdeasKeywords: string;
   generatedStoryIdeas: StoryIdea[];
   selectedIdeaIds: string[];
@@ -165,8 +160,6 @@ export interface ProStorySettings {
   incitingIncidentIdea: string; 
   productionProtocol: ProductionProtocol;
   videoBudget: number;
-  scriptDurationMinMinutes: number;
-  scriptDurationMaxMinutes: number;
   realisticImages: boolean;
   sourceFile?: { name: string; data: string; mimeType: string };
 }
@@ -199,8 +192,7 @@ export type PresetVoiceKey =
   | 'Friendly_F'
   | 'Friendly_M'
   | 'Professional_M'
-  | 'Young_F' 
-  | 'Young_M'; 
+  | 'Calm_F'; 
 
 export interface PresetVoiceConfig {
   key: PresetVoiceKey;
@@ -231,6 +223,7 @@ export interface AIAnalyzedScene {
 export interface AIAnalyzedScript {
   scenes: AIAnalyzedScene[];
   allCharacters: string[];
+  characterVoices?: Record<string, PresetVoiceKey>;
 }
 
 export interface SynthesizedChunk {
@@ -238,7 +231,6 @@ export interface SynthesizedChunk {
   audioDataUrl: string; 
   sceneNumbers: number[];
   downloadFilename: string;
-  kind?: 'scene' | 'compiled_master';
 }
 
 export interface TitleCardData {

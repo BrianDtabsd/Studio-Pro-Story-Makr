@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { SceneImageDefinition, StoryIdea, AIAnalyzedScript } from '../../types.ts';
 import { SectionCard } from '../SectionCard.tsx';
 import { TextAreaInput } from '../common/TextAreaInput.tsx';
@@ -29,69 +29,14 @@ export const SceneImageManager: React.FC<Props> = ({
   globalImageStylePrompt, onGlobalImageStylePromptChange, onNavigateToNextStep, 
   analyzedScripts, onAnalyzedScriptsChange 
 }) => {
-  const asUiError = (error: unknown, prefix: string): string => {
-    if (error instanceof Error && error.message.trim().length > 0) {
-      return `${prefix} ${error.message}`;
-    }
-    if (typeof error === 'string' && error.trim().length > 0) {
-      return `${prefix} ${error}`;
-    }
-    try {
-      const asJson = JSON.stringify(error);
-      if (asJson && asJson !== '{}') return `${prefix} ${asJson}`;
-    } catch {
-      // ignore JSON serialization errors
-    }
-    return prefix;
-  };
-
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(selectedEpisodes[0]?.id || story?.id || null);
+  const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(story?.id || null);
 
-  const activeStory =
-    selectedEpisodes.find((e) => e.id === activeEpisodeId) ||
-    selectedEpisodes[0] ||
-    story;
+  const activeStory = selectedEpisodes.find(e => e.id === activeEpisodeId) || story;
   const currentScript = activeStory ? (editableScripts[activeStory.id] || scripts[activeStory.id] || '') : '';
   const currentAnalyzedScript = activeStory ? analyzedScripts[activeStory.id] : null;
   const currentDefs = activeStory ? (sceneImageDefinitions[activeStory.id] || []) : [];
-
-  const IMAGE_TIMEOUT_MS = 150000;
-  const VIDEO_TIMEOUT_MS = 420000;
-  const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> => {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<T>((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
-    });
-    try {
-      return await Promise.race([promise, timeoutPromise]);
-    } finally {
-      if (timeoutId) clearTimeout(timeoutId);
-    }
-  };
-
-  useEffect(() => {
-    setActiveEpisodeId((prev) => {
-      if (selectedEpisodes.length > 0) {
-        if (prev && selectedEpisodes.some((episode) => episode.id === prev)) return prev;
-        return selectedEpisodes[0].id;
-      }
-      return story?.id || null;
-    });
-  }, [selectedEpisodes, story?.id]);
-
-  // Safety reset: if a project is reopened after abandoning generation, clear stale
-  // in-progress flags so the UI never remains in a permanent spinner state.
-  useEffect(() => {
-    if (!activeStory) return;
-    if (!currentDefs.some((def) => def.isGenerating)) return;
-    const resetDefs = currentDefs.map((def) => ({ ...def, isGenerating: false }));
-    onSceneImageDefinitionsChange({
-      ...sceneImageDefinitions,
-      [activeStory.id]: resetDefs,
-    });
-  }, [activeStory, currentDefs, onSceneImageDefinitionsChange, sceneImageDefinitions]);
 
   const handleAnalyze = async () => {
     if (!activeStory || !currentScript.trim()) return;
@@ -107,13 +52,14 @@ export const SceneImageManager: React.FC<Props> = ({
         sceneContentExcerpt: s.description, 
         aiSuggestedPrompt: s.visualPrompt, 
         userEditedPrompt: s.visualPrompt,
-        isImageGenerationEnabled: true, 
+        isImageGenerationEnabled: !!s.visualPrompt, 
+        isVideoGenerationEnabled: !!s.visualPrompt,
         isGenerating: false, 
         assetType: s.assetType || 'image'
       }));
       onSceneImageDefinitionsChange({ ...sceneImageDefinitions, [activeStory.id]: defs });
-    } catch (e: unknown) { 
-        setError(asUiError(e, 'Script layout failed.'));
+    } catch (e: any) { 
+        setError(e.message || "Script layout failed."); 
     } finally { 
         setLoading(false); 
     }
@@ -129,26 +75,21 @@ export const SceneImageManager: React.FC<Props> = ({
       onSceneImageDefinitionsChange({ ...sceneImageDefinitions, [activeStory.id]: newDefs });
     };
 
-    updateDef(sceneNum, { isGenerating: true, generationError: undefined });
+    updateDef(sceneNum, { isGenerating: true });
     try {
       if (type === 'image') {
-        const url = await withTimeout(
-          generateImageForPrompt(`${def.userEditedPrompt} ${globalImageStylePrompt}`, activeStory.proSettingsUsed?.realisticImages),
-          IMAGE_TIMEOUT_MS,
-          'Image generation timed out. Please retry or simplify the prompt.'
-        );
-        updateDef(sceneNum, { generatedImageUrl: url, isGenerating: false, generationError: undefined });
+        const url = await generateImageForPrompt(`${def.userEditedPrompt} ${globalImageStylePrompt}`, activeStory.proSettingsUsed?.realisticImages);
+        updateDef(sceneNum, { generatedImageUrl: url, isGenerating: false });
       } else {
-        const url = await withTimeout(
-          generateVideoForPrompt(def.userEditedPrompt, '1080p', def.generatedImageUrl),
-          VIDEO_TIMEOUT_MS,
-          'Video generation timed out. Please retry with a shorter, simpler motion prompt.'
-        );
-        updateDef(sceneNum, { generatedVideoUrl: url, isGenerating: false, generationError: undefined });
+        let videoPrompt = `${def.userEditedPrompt} - Short Video Clip`;
+        if (def.generatedImageUrl) {
+          videoPrompt += ` (Use the provided image as the starting frame and maintain visual consistency)`;
+        }
+        const url = await generateVideoForPrompt(videoPrompt, '1080p', def.generatedImageUrl);
+        updateDef(sceneNum, { generatedVideoUrl: url, isGenerating: false });
       }
-    } catch (e: unknown) { 
-      const message = asUiError(e, 'Generation failed. Please retry.');
-      updateDef(sceneNum, { isGenerating: false, generationError: message });
+    } catch (e: any) { 
+      updateDef(sceneNum, { isGenerating: false, generationError: e.message });
     }
   };
 
@@ -194,7 +135,7 @@ export const SceneImageManager: React.FC<Props> = ({
                 <h3 className="text-sm font-bold text-neu-text-dark uppercase">Visual Assets Registry</h3>
                 <div className="flex items-center gap-4">
                     <input type="text" placeholder="Global Style (e.g. 8k photography)" value={globalImageStylePrompt} onChange={e => onGlobalImageStylePromptChange(e.target.value)} className="neu-pressed text-neu-text-dark text-xs p-2 rounded-lg w-48 focus:outline-none" />
-                    <ActionButton onClick={onNavigateToNextStep} className="py-2 px-6 text-xs">Step 5: Cover Art</ActionButton>
+                    <ActionButton onClick={onNavigateToNextStep} className="py-2 px-6 text-xs">Step 5: Final Export</ActionButton>
                 </div>
               </div>
               
@@ -212,9 +153,32 @@ export const SceneImageManager: React.FC<Props> = ({
                         onSceneImageDefinitionsChange({ ...sceneImageDefinitions, [activeStory.id]: newDefs });
                       }} rows={3} />
                       
-                      <div className="flex gap-3">
+                      <div className="flex gap-3 items-center">
                         <button onClick={() => handleGenerate(def.sceneNumber, 'image')} disabled={def.isGenerating} className="flex-1 py-4 neu-btn text-xs font-bold uppercase text-neu-text-dark">Draw Still Image</button>
-                        <button onClick={() => handleGenerate(def.sceneNumber, 'video')} disabled={def.isGenerating || !def.generatedImageUrl} className="flex-1 py-4 neu-btn text-xs font-bold uppercase text-accent-orange disabled:opacity-50">Animate Video</button>
+                        <div className="flex-1 flex items-center gap-2">
+                          <button 
+                            onClick={() => handleGenerate(def.sceneNumber, 'video')} 
+                            disabled={def.isGenerating || !def.generatedImageUrl || def.isVideoGenerationEnabled === false} 
+                            className={`flex-1 py-4 neu-btn text-xs font-bold uppercase disabled:opacity-50 ${def.isVideoGenerationEnabled === false ? 'text-neu-text' : 'text-accent-orange'}`}
+                          >
+                            {def.isVideoGenerationEnabled === false ? 'Video Skipped' : 'Animate Video'}
+                          </button>
+                          <label className="flex items-center cursor-pointer" title="Enable/Disable Video Generation">
+                            <div className="relative">
+                              <input 
+                                type="checkbox" 
+                                className="sr-only" 
+                                checked={def.isVideoGenerationEnabled !== false}
+                                onChange={(e) => {
+                                  const newDefs = currentDefs.map(d => d.sceneNumber === def.sceneNumber ? { ...d, isVideoGenerationEnabled: e.target.checked } : d);
+                                  onSceneImageDefinitionsChange({ ...sceneImageDefinitions, [activeStory.id]: newDefs });
+                                }}
+                              />
+                              <div className={`block w-10 h-6 rounded-full transition-colors ${def.isVideoGenerationEnabled !== false ? 'bg-accent-orange' : 'bg-gray-300'}`}></div>
+                              <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${def.isVideoGenerationEnabled !== false ? 'transform translate-x-4' : ''}`}></div>
+                            </div>
+                          </label>
+                        </div>
                       </div>
                     </div>
                     
@@ -225,9 +189,9 @@ export const SceneImageManager: React.FC<Props> = ({
                             <p className="text-xs font-bold text-accent-orange uppercase mt-2">Splicing Visual Substrate...</p>
                         </div>
                       ) : def.generatedVideoUrl ? (
-                        <video src={def.generatedVideoUrl} controls className="w-full h-full object-cover" />
+                        <video src={def.generatedVideoUrl || undefined} controls className="w-full h-full object-cover" />
                       ) : def.generatedImageUrl ? (
-                        <img src={def.generatedImageUrl} className="w-full h-full object-cover" />
+                        <img src={def.generatedImageUrl || undefined} className="w-full h-full object-cover" />
                       ) : (
                         <div className="text-center p-8 opacity-40 group-hover/preview:opacity-60 transition-opacity">
                             <svg className="w-12 h-12 mx-auto mb-4 text-neu-text" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>

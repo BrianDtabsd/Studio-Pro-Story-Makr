@@ -82,7 +82,7 @@ export const FreeformImageGenerator: React.FC<FreeformImageGeneratorProps> = ({
                             <div className="w-2 h-2 bg-accent-orange rounded-full animate-ping"></div>
                         </div>
                         <div className="aspect-video rounded-2xl overflow-hidden neu-pressed mb-6 relative group/img">
-                            <img src={image.src} alt={image.prompt || 'Generated image'} title={image.prompt || 'Generated image'} className="w-full h-full object-cover transition-transform duration-700 group-hover/img:scale-110" />
+                            <img src={image.src || undefined} className="w-full h-full object-cover transition-transform duration-700 group-hover/img:scale-110" />
                             <div className="absolute inset-0 bg-neu-base/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center">
                                 <DownloadButton fileUrl={image.src} fileName={`gen_${image.id}.jpg`} buttonText="EXPORT" className="neu-btn text-accent-orange font-bold" />
                             </div>

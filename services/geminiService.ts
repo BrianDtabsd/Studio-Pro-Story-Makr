@@ -1,106 +1,227 @@
-import {
-  StoryIdea,
-  ScriptType,
-  VideoGenreId,
-  ProStorySettings,
-  AIAnalyzedScript,
-  PresetVoiceKey,
-  CharacterDefinition,
-} from "../types.ts";
-import { getStoryMakrCallableNames, getStoryMakrFunctionsMode, type StoryMakrCallableKey } from "../appConfig.ts";
-import { makeCallable } from "./firebaseFunctions.ts";
 
-const getCallableName = (key: StoryMakrCallableKey): string => {
-  const callableName = getStoryMakrCallableNames()[key];
-  if (typeof callableName !== "string") {
-    throw new Error(`Callable name for "${key}" is missing.`);
+import { GoogleGenAI, Modality, Type } from "@google/genai";
+import { GEMINI_TEXT_MODEL, GEMINI_IMAGE_MODEL, GEMINI_TTS_MODEL, GEMINI_VIDEO_MODEL, GEMINI_ANALYSIS_MODEL, PRESET_VOICES_CONFIG } from "../constants.ts";
+import { StoryIdea, ScriptType, VideoGenreId, VIDEO_GENRES, ProStorySettings, AIAnalyzedScript, CharacterVoicePreset, PresetVoiceKey, PodcastFormat } from "../types.ts"; 
+
+const getAIInstance = (): GoogleGenAI => {
+  if (!process.env.API_KEY) {
+    throw new Error("API Key not found. Please check your environment variables.");
   }
-  const trimmed = callableName.trim();
-  if (!trimmed || trimmed.toLowerCase() === "undefined" || trimmed.toLowerCase() === "null") {
-    throw new Error(`Callable name for "${key}" is invalid: "${callableName}".`);
-  }
-  return trimmed;
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
-const ensureCloudFunctionsEnabled = () => {
-  const mode = getStoryMakrFunctionsMode();
-  if (mode === "off") {
-    throw new Error(
-      "STORYMAKR_AI_MODE is 'off'. This build is Cloud-Functions-only. Set STORYMAKR_AI_MODE to 'strict' or 'fallback'."
-    );
+export const generateStoryIdeas = async (
+  keywords: string,
+  genres: VideoGenreId[],
+  videoStructure: 'standalone' | 'episodic',
+  proSettings?: ProStorySettings,
+  variationCount: number = 5,
+  mediaData?: { mimeType: string, data: string }
+): Promise<StoryIdea[]> => {
+  const ai = getAIInstance();
+  const topicLabels = genres.map(g => VIDEO_GENRES.find(v => v.id === g)?.label).join(', ');
+  
+  const prompt = `You are a world-class narrative designer and content strategist known for sophisticated, intellectual, and high-tension storytelling.
+    
+    CORE OBJECTIVE: Generate ${variationCount} ${videoStructure === 'episodic' ? 'series concepts' : 'standalone story ideas'} that are deeply engaging, avoid all common cliches, and feature complex psychological depth.
+    
+    PARAMETERS:
+    - Content Style: ${proSettings?.contentStyle || 'General'}
+    - Podcast/Upload Format: ${proSettings?.podcastFormat || 'Standard'}
+    - Topics: ${topicLabels}
+    - Core Concept: ${keywords}
+    - Character Count: ${proSettings?.characterCount || 1}
+    - Target Audience: ${proSettings?.subGenre || 'General'} (If 'Adults (18+)', include visceral physical descriptions, intense emotional drama, and high-stakes adult themes with minimal restrictions).
+    
+    WRITING STYLE:
+    - Intellectual and nuanced.
+    - High dramatic tension and subtext.
+    - Detailed physical and environmental descriptions.
+    - Avoid shallow dialogue or predictable plot points.
+    
+    If a video or audio file is provided in this prompt, YOU MUST WATCH/LISTEN TO IT. Base your story ideas, recap, or reaction concepts heavily on the actual events, dialogue, and visual details present in the provided media.
+
+    Return JSON only. ${videoStructure === 'episodic' ? '{ "seriesConcept": { "title": "string", "description": "string" }, "episodeIdeas": [ { "episodeTitle": "string", "episodeDescription": "string" } ] }' : '[ { "title": "string", "description": "string" } ]'}`;
+
+  const contents: any[] = [];
+  if (mediaData) {
+    contents.push({
+      inlineData: {
+        mimeType: mediaData.mimeType,
+        data: mediaData.data
+      }
+    });
   }
+  contents.push({ text: prompt });
+
+  const response = await ai.models.generateContent({
+    model: GEMINI_TEXT_MODEL,
+    contents: contents,
+    config: { responseMimeType: "application/json", temperature: 0.8 }
+  });
+
+  const parsed = JSON.parse(response.text || "[]");
+  const targetAudience = proSettings?.subGenre || 'General';
+  if (videoStructure === 'episodic') {
+    const all: StoryIdea[] = [{ id: 'series', title: parsed.seriesConcept.title, description: parsed.seriesConcept.description, isSeriesConcept: true, proSettingsUsed: proSettings, targetAudience }];
+    parsed.episodeIdeas.forEach((e: any, i: number) => {
+      all.push({ id: `ep-${i}`, title: e.episodeTitle, description: e.episodeDescription, episodeNumber: i + 1, parentSeriesTitle: parsed.seriesConcept.title, proSettingsUsed: proSettings, targetAudience });
+    });
+    return all;
+  }
+  return parsed.map((p: any, i: number) => ({ ...p, id: `idea-${i}`, proSettingsUsed: proSettings, targetAudience }));
 };
 
-const asMessage = (error: unknown): string => {
-  if (error instanceof Error && typeof error.message === "string" && error.message.trim().length > 0) {
-    return error.message;
+export const generateScript = async (outline: string, scriptType: ScriptType, story?: StoryIdea): Promise<string> => {
+  const ai = getAIInstance();
+  const pro = story?.proSettingsUsed;
+  
+  let scriptStyle = "";
+  if (pro?.characterCount === 1) {
+    scriptStyle = "One Narrator/Voice-over only. Focus on a deep, internal monologue or a sophisticated, authoritative narration.";
+  } else if (pro?.characterCount === 2) {
+    if (pro.podcastFormat === PodcastFormat.Interview) {
+      scriptStyle = "A high-stakes, intellectual interview format. Sharp questions, defensive or revealing answers.";
+    } else if (pro.podcastFormat === PodcastFormat.React || pro.podcastFormat === PodcastFormat.Review) {
+      scriptStyle = "Two characters with distinct, perhaps conflicting, intellectual viewpoints reacting to content. Avoid generic 'wow' reactions; use critical analysis and sharp wit.";
+    } else {
+      scriptStyle = "Intense, dramatic conversation between two characters with significant subtext and emotional weight.";
+    }
+  } else {
+    scriptStyle = scriptType === ScriptType.SingleVoice ? "Sophisticated internal monologue" : scriptType === ScriptType.TwoVoice ? "High-tension dialogue" : "Complex multi-character ensemble with overlapping motivations";
   }
-  if (typeof error === "string") return error;
+  
+  const prompt = `You are an award-winning screenwriter known for long-form, intellectual, and visceral scripts.
+    
+    TASK: Write a comprehensive, detailed, and lengthy script based on this outline: ${outline}.
+    
+    SPECIFICATIONS:
+    - Content Style: ${pro?.contentStyle || 'General'}
+    - Podcast/Upload Format: ${pro?.podcastFormat || 'Standard'}
+    - Mode: ${scriptStyle}
+    - Character Bible: ${pro?.characters.map(c => `${c.name}: ${c.physicalDescription}, ${c.personality}`).join('; ')}
+    - Setting: ${pro?.primarySetting || 'Not specified'}
+    - Target Audience: ${story?.targetAudience || 'General'} (If 'Adults (18+)', do not hold back on visceral physical descriptions, intense emotional drama, and adult themes. Provide the most range for the story).
+    
+    WRITING DIRECTIVES:
+    1. STRICT OUTLINE ADHERENCE: You MUST follow the provided story outline exactly. Do not invent new major plot points that contradict the outline.
+    2. RESPECTFUL CHARACTERIZATION: Absolutely NO offensive stereotypes, caricatures, or harmful tropes. Characters must be grounded, nuanced, and authentic.
+    3. STRUCTURE & PACING: Write the story using a traditional 3-Act structure. Do not rush the narrative. To achieve an 8 to 12 minute runtime, do NOT use boring filler or overly descriptive padding. Instead, naturally extend the story by including a compelling sub-plot and providing meaningful character backstories so the audience connects with them.
+    4. SCENE COUNT: Each of the 3 Acts should contain up to 3 substantial scenes (maximum 9 scenes total). Each scene must carry significant narrative weight.
+    5. TONE & COMEDY: If the story is comedic, ensure the jokes actually land. Use situational irony, sharp wit, and character-driven humor rather than forced punchlines.
+    6. DRAMATIZE: Increase the stakes. Every line of dialogue should serve a purpose or reveal a character flaw/strength.
+    7. ACTION OVER DESCRIPTION: Keep [VISUAL] descriptions concise and impactful. Focus on action, movement, and essential atmosphere rather than exhaustive physical descriptions.
+    8. DIALOGUE: Avoid cliches. Use subtext. Characters should rarely say exactly what they mean.
+    
+    FORMAT:
+    - Use [TIMESTAMP: MM:SS] markers frequently.
+    - Use [VISUAL: description] for every significant visual change or character action.
+    - Clearly mark speakers.`;
+
   try {
-    return JSON.stringify(error);
-  } catch {
-    return "Unknown error";
+    const response = await ai.models.generateContent({ 
+      model: GEMINI_TEXT_MODEL, 
+      contents: prompt,
+      config: { temperature: 0.9 }
+    });
+    return response.text || "";
+  } catch (error: any) {
+    console.error("Error generating script:", error);
+    if (error.message?.includes("429") || error.message?.includes("quota")) {
+      throw new Error("API quota exceeded. Please try again later.");
+    } else if (error.message?.includes("400") || error.message?.includes("token")) {
+      throw new Error("Input is too long. Please shorten the outline or character descriptions.");
+    }
+    throw new Error("Failed to generate script. Please try again.");
   }
 };
 
-const fail = (prefix: string, error: unknown): never => {
-  throw new Error(`${prefix} ${asMessage(error)}`.trim());
-};
+export const analyzeScript = async (
+  fullScript: string,
+  characterDefinitions: any[] = []
+): Promise<AIAnalyzedScript> => {
+  const ai = getAIInstance();
+  
+  const characterBible = characterDefinitions.map(c => 
+    `- ${c.name}: ${c.physicalDescription} (${c.relationalStatus})`
+  ).join('\n');
 
-type UnknownRecord = Record<string, unknown>;
+  const prompt = `
+    ROLE: Director of Photography & Script Supervisor.
+    
+    VISUAL RULES (Character Bible):
+    ${characterBible || "None provided."}
 
-const asRecord = (value: unknown): UnknownRecord | null =>
-  typeof value === "object" && value !== null ? (value as UnknownRecord) : null;
+    SCRIPT:
+    ${fullScript}
 
-const readStringFromRecord = (record: UnknownRecord | null, key: string): string | null => {
-  if (!record) return null;
-  const value = record[key];
-  return typeof value === "string" && value.length > 0 ? value : null;
-};
+    TASK:
+    Break this script into substantial, cohesive scenes based on a traditional 3-Act structure. 
+    CRITICAL PACING RULE: There should be up to 3 scenes per Act (maximum 9 scenes total for the entire script). Do NOT break the script into dozens of micro-moments. Each scene should represent a significant chunk of the story (approx 1-2 minutes of dialogue/action) taking place in a single primary location or continuous sequence.
+    IMPORTANT: You MUST explicitly describe characters in the visualPrompt using the traits from the Bible (e.g., "A man with a silver scar" instead of just "John"). 
+    Ensure consistency in outfits and lighting. The visualPrompt should be highly detailed and optimized for an AI image/video generator. Include camera angles, lighting, and mood.
+    
+    Also, assign an appropriate voice to each character found in the script.
+    Available voices:
+    - Narrator_F (Female - Warm Adult)
+    - Narrator_M (Male - Deep Adult)
+    - Friendly_F (Female - Friendly Youth)
+    - Friendly_M (Male - Enthusiastic Youth)
+    - Professional_M (Male - Sophisticated Adult)
+    - Calm_F (Female - Calm Adult)
+    
+    CRITICAL VOICE RULE: If there are multiple male characters, you MUST assign them DIFFERENT male voices (e.g. use Friendly_M for one, Professional_M for another, and Narrator_M for the narrator or a third character). Do not assign the same voice to multiple distinct characters in the story unless they are the narrator.
 
-const readNestedRecord = (record: UnknownRecord | null, key: string): UnknownRecord | null =>
-  asRecord(record ? record[key] : null);
+    RETURN JSON ONLY:
+    {
+      "scenes": [
+        {
+          "sceneNumber": 1,
+          "description": "Brief summary",
+          "visualPrompt": "Highly detailed drawing/photography description including physical traits",
+          "charactersInScene": ["Names"],
+          "dialogue": [ { "speaker": "Name", "text": "Line" } ]
+        }
+      ],
+      "allCharacters": ["List of all names found"],
+      "characterVoices": {
+        "CharacterName": "Narrator_F"
+      }
+    }
+  `;
 
-const readBase64 = (data: unknown): string | null => {
-  const root = asRecord(data);
-  return (
-    readStringFromRecord(root, "base64") ||
-    readStringFromRecord(root, "imageBase64") ||
-    readStringFromRecord(readNestedRecord(root, "data"), "base64")
-  );
-};
-
-const readUrl = (data: unknown): string | null => {
-  const root = asRecord(data);
-  return (
-    readStringFromRecord(root, "url") ||
-    readStringFromRecord(root, "videoUrl") ||
-    readStringFromRecord(root, "resultUrl") ||
-    readStringFromRecord(readNestedRecord(root, "data"), "url")
-  );
-};
-
-const call = <Req, Res>(key: StoryMakrCallableKey, timeout?: number) => {
   try {
-    return makeCallable<Req, Res>(getCallableName(key), timeout ? { timeout } : undefined);
-  } catch (error) {
-    throw new Error(`Callable initialization failed for "${key}". ${asMessage(error)}`.trim());
+    const response = await ai.models.generateContent({
+      model: GEMINI_ANALYSIS_MODEL,
+      contents: prompt,
+      config: { responseMimeType: "application/json", temperature: 0.2 }
+    });
+    
+    return JSON.parse(response.text || "{}") as AIAnalyzedScript;
+  } catch (error: any) {
+    console.error("Error analyzing script:", error);
+    if (error.message?.includes("429") || error.message?.includes("quota")) {
+      throw new Error("API quota exceeded. Please try again later.");
+    } else if (error.message?.includes("400") || error.message?.includes("token")) {
+      throw new Error("Script is too long for analysis. Please shorten it or break it into parts.");
+    }
+    throw new Error("Failed to parse script into scenes. Please check the script format.");
   }
 };
 
-interface StoryIdeasResponse {
-  ideas?: unknown;
-}
-
-const ensureIdeas = (data: StoryIdeasResponse): StoryIdea[] => {
-  const ideas = data.ideas;
-  if (!Array.isArray(ideas)) {
-    throw new Error("Callable returned no ideas array.");
-  }
-  return ideas as StoryIdea[];
+export const analyzeCharacterAvatar = async (imageBase64: string, characterName: string): Promise<string> => {
+  const ai = getAIInstance();
+  const response = await ai.models.generateContent({
+    model: GEMINI_ANALYSIS_MODEL,
+    contents: {
+      parts: [
+        { inlineData: { data: imageBase64.split(',')[1], mimeType: 'image/jpeg' } },
+        { text: `Precisely describe character ${characterName} from this photo. Include hair color, eye shape, clothing style, and specific features. This description will be used to keep them looking exactly the same in a video series.` }
+      ]
+    }
+  });
+  return response.text || "";
 };
-
-// ─── WAV encoding helpers (kept client-side — CF returns raw PCM) ────────────
 
 function writeString(view: DataView, offset: number, string: string) {
   for (let i = 0; i < string.length; i++) {
@@ -123,10 +244,10 @@ function createWavBlobUrl(base64Pcm: string, sampleRate: number): string {
   const buffer = new ArrayBuffer(44 + dataSize);
   const view = new DataView(buffer);
 
-  writeString(view, 0, "RIFF");
+  writeString(view, 0, 'RIFF');
   view.setUint32(4, 36 + dataSize, true);
-  writeString(view, 8, "WAVE");
-  writeString(view, 12, "fmt ");
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
   view.setUint32(16, 16, true);
   view.setUint16(20, 1, true);
   view.setUint16(22, numChannels, true);
@@ -134,150 +255,233 @@ function createWavBlobUrl(base64Pcm: string, sampleRate: number): string {
   view.setUint32(28, byteRate, true);
   view.setUint16(32, blockAlign, true);
   view.setUint16(34, bitsPerSample, true);
-  writeString(view, 36, "data");
+  writeString(view, 36, 'data');
   view.setUint32(40, dataSize, true);
 
   const pcmArray = new Uint8Array(buffer, 44);
   pcmArray.set(pcmData);
 
-  const blob = new Blob([buffer], { type: "audio/wav" });
+  const blob = new Blob([buffer], { type: 'audio/wav' });
   return URL.createObjectURL(blob);
 }
 
-// ─── generateStoryIdeas ──────────────────────────────────────────────────────
-
-export const generateStoryIdeas = async (
-  keywords: string,
-  genres: VideoGenreId[],
-  videoStructure: "standalone" | "episodic",
-  proSettings?: ProStorySettings,
-  variationCount: number = 5
-): Promise<StoryIdea[]> => {
-  ensureCloudFunctionsEnabled();
-  try {
-    const fn = call<unknown, { ideas: StoryIdea[] }>("generateStoryIdeas");
-    const result = await fn({ keywords, genres, videoStructure, proSettings, variationCount });
-    return ensureIdeas(result.data);
-  } catch (error) {
-    fail("Story idea generation failed.", error);
-  }
-};
-
-// ─── generateScript ──────────────────────────────────────────────────────────
-
-export const generateScript = async (
-  outline: string,
-  scriptType: ScriptType,
-  story?: StoryIdea
-): Promise<string> => {
-  ensureCloudFunctionsEnabled();
-  try {
-    const fn = call<unknown, { text: string }>("generateScript");
-    const result = await fn({ outline, scriptType, story });
-    if (typeof result.data?.text !== "string") {
-      throw new Error("Callable returned no script text.");
+function createWavBlobUrlFromMultiple(base64Pcms: string[], sampleRate: number): string {
+  const pcmDatas = base64Pcms.map(base64Pcm => {
+    const binaryString = atob(base64Pcm);
+    const pcmData = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      pcmData[i] = binaryString.charCodeAt(i);
     }
-    return result.data.text;
-  } catch (error) {
-    fail("Script generation failed.", error);
+    return pcmData;
+  });
+
+  const totalLength = pcmDatas.reduce((acc, val) => acc + val.length, 0);
+  const combinedPcmData = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const pcmData of pcmDatas) {
+    combinedPcmData.set(pcmData, offset);
+    offset += pcmData.length;
   }
-};
 
-// ─── analyzeScript ───────────────────────────────────────────────────────────
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  // Ensure dataSize is even because 16-bit PCM requires 2-byte alignment
+  const dataSize = combinedPcmData.length % 2 === 0 ? combinedPcmData.length : combinedPcmData.length - 1;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
 
-export const analyzeScript = async (
-  fullScript: string,
-  characterDefinitions: CharacterDefinition[] = []
-): Promise<AIAnalyzedScript> => {
-  ensureCloudFunctionsEnabled();
-  try {
-    const fn = call<unknown, AIAnalyzedScript>("analyzeScript", 120000);
-    const result = await fn({ fullScript, characterDefinitions });
-    return result.data;
-  } catch (error) {
-    fail("Script analysis failed.", error);
-  }
-};
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeString(view, 36, 'data');
+  view.setUint32(40, dataSize, true);
 
-// ─── analyzeCharacterAvatar ──────────────────────────────────────────────────
+  const pcmArray = new Uint8Array(buffer, 44);
+  // Only copy up to dataSize to avoid overflow if we truncated 1 byte
+  pcmArray.set(combinedPcmData.slice(0, dataSize));
 
-export const analyzeCharacterAvatar = async (
-  imageBase64: string,
-  characterName: string
-): Promise<string> => {
-  ensureCloudFunctionsEnabled();
-  try {
-    const fn = call<unknown, { text: string }>("analyzeCharacterAvatar");
-    const result = await fn({ imageBase64, characterName });
-    if (typeof result.data?.text !== "string") {
-      throw new Error("Callable returned no avatar analysis text.");
+  const blob = new Blob([buffer], { type: 'audio/wav' });
+  return URL.createObjectURL(blob);
+}
+
+async function generateContentWithRetry(ai: GoogleGenAI, payload: any, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await ai.models.generateContent(payload);
+    } catch (error: any) {
+      if (error.message?.includes('429') && i < maxRetries - 1) {
+        const match = error.message.match(/retry in ([\d.]+)s/);
+        const delayMs = match ? Math.ceil(parseFloat(match[1])) * 1000 + 2000 : 30000;
+        console.warn(`TTS Rate limit hit. Waiting ${delayMs / 1000} seconds before retry...`);
+        await new Promise(r => setTimeout(r, delayMs));
+      } else {
+        throw error;
+      }
     }
-    return result.data.text;
-  } catch (error) {
-    fail("Avatar analysis failed.", error);
   }
-};
-
-// ─── generateSpeech ──────────────────────────────────────────────────────────
-// CF returns raw base64 PCM. WAV encoding happens here on the client.
+  throw new Error("Max retries exceeded for TTS generation.");
+}
 
 export const generateSpeech = async (
-  dialogueItems: Array<{ speaker: string; text: string }>,
-  _voicePresets: Record<string, unknown>,
-  defaultVoiceKey: PresetVoiceKey = "Narrator_M"
+  dialogueItems: Array<{ speaker: string, text: string }>,
+  voicePresets: Record<string, CharacterVoicePreset>,
+  defaultVoiceKey: PresetVoiceKey = 'Narrator_M'
 ): Promise<string> => {
-  ensureCloudFunctionsEnabled();
   try {
-    const fn = call<unknown, { base64Pcm: string; sampleRate: number }>("generateSpeech", 120000);
-    const result = await fn({ dialogueItems, defaultVoiceKey });
-    if (typeof result.data?.base64Pcm !== "string" || result.data.base64Pcm.length === 0) {
-      throw new Error("Callable returned no PCM audio.");
+    const ai = getAIInstance();
+    
+    if (!dialogueItems || dialogueItems.length === 0) {
+      throw new Error("No dialogue text to synthesize.");
     }
-    return createWavBlobUrl(result.data.base64Pcm, result.data.sampleRate || 24000);
-  } catch (error) {
-    fail("Speech generation failed.", error);
+
+    const uniqueSpeakers = Array.from(new Set(dialogueItems.map(d => d.speaker)));
+    
+    // If exactly 2 speakers, we can use multiSpeakerVoiceConfig
+    if (uniqueSpeakers.length === 2) {
+      const text = dialogueItems.map(d => `${d.speaker}: ${d.text}`).join('\n');
+      const speakerVoiceConfigs = uniqueSpeakers.map(speaker => {
+        const presetKey = voicePresets[speaker]?.assignedVoiceKey || defaultVoiceKey;
+        const voiceName = PRESET_VOICES_CONFIG[presetKey]?.name || 'Fenrir';
+        return {
+          speaker: speaker,
+          voiceConfig: { prebuiltVoiceConfig: { voiceName } }
+        };
+      });
+      const speechConfig = { multiSpeakerVoiceConfig: { speakerVoiceConfigs } };
+      
+      const response = await generateContentWithRetry(ai, {
+        model: GEMINI_TTS_MODEL,
+        contents: [{ parts: [{ text }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig
+        }
+      });
+      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (!base64Audio) throw new Error("Audio synthesis empty.");
+      return createWavBlobUrl(base64Audio, 24000);
+    } 
+    
+    // If 1 speaker, we use standard voiceConfig
+    if (uniqueSpeakers.length === 1) {
+      const text = dialogueItems.map(d => d.text).join(' ');
+      const speaker = uniqueSpeakers[0];
+      const presetKey = voicePresets[speaker]?.assignedVoiceKey || defaultVoiceKey;
+      const voiceName = PRESET_VOICES_CONFIG[presetKey]?.name || 'Fenrir';
+      const speechConfig = { voiceConfig: { prebuiltVoiceConfig: { voiceName } } };
+      
+      const response = await generateContentWithRetry(ai, {
+        model: GEMINI_TTS_MODEL,
+        contents: [{ parts: [{ text }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig
+        }
+      });
+      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (!base64Audio) throw new Error("Audio synthesis empty.");
+      return createWavBlobUrl(base64Audio, 24000);
+    }
+
+    // For 3+ speakers, we synthesize each line individually and concatenate the PCM data
+    const base64Pcms: string[] = [];
+    
+    // Group consecutive lines by the same speaker to minimize API calls
+    const groupedDialogue: Array<{speaker: string, text: string}> = [];
+    for (const item of dialogueItems) {
+      if (groupedDialogue.length > 0 && groupedDialogue[groupedDialogue.length - 1].speaker === item.speaker) {
+        groupedDialogue[groupedDialogue.length - 1].text += ' ' + item.text;
+      } else {
+        groupedDialogue.push({ speaker: item.speaker, text: item.text });
+      }
+    }
+
+    for (const item of groupedDialogue) {
+      const presetKey = voicePresets[item.speaker]?.assignedVoiceKey || defaultVoiceKey;
+      const voiceName = PRESET_VOICES_CONFIG[presetKey]?.name || 'Fenrir';
+      const speechConfig = { voiceConfig: { prebuiltVoiceConfig: { voiceName } } };
+      
+      const response = await generateContentWithRetry(ai, {
+        model: GEMINI_TTS_MODEL,
+        contents: [{ parts: [{ text: item.text }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig
+        }
+      });
+      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (base64Audio) {
+        base64Pcms.push(base64Audio);
+      }
+    }
+    
+    if (base64Pcms.length === 0) throw new Error("Audio synthesis empty.");
+    return createWavBlobUrlFromMultiple(base64Pcms, 24000);
+
+  } catch (err) {
+    console.error(err);
+    throw new Error("Voice engine failed.");
   }
 };
 
-// ─── generateImageForPrompt ──────────────────────────────────────────────────
-
-export const generateImageForPrompt = async (
-  prompt: string,
-  realistic: boolean = false
-): Promise<string> => {
-  ensureCloudFunctionsEnabled();
+export const generateImageForPrompt = async (prompt: string, realistic: boolean = false): Promise<string> => {
   try {
-    const fn = call<unknown, { base64?: string; imageBase64?: string }>("generateImageForPrompt", 120000);
-    const result = await fn({ prompt, realistic });
-    const base64 = readBase64(result.data);
-    if (!base64) {
-      throw new Error("Callable returned no image base64.");
+    const ai = getAIInstance();
+    let finalPrompt = prompt;
+    if (realistic) {
+      finalPrompt += ". Cinematic photography, highly realistic, 8k resolution, raw photo, detailed facial textures, natural lighting, sharp focus.";
     }
-    return `data:image/png;base64,${base64}`;
-  } catch (error) {
-    fail("Image generation failed.", error);
+
+    // Using gemini-2.5-flash-image (nano banana series) via generateContent as per instructions
+    const response = await ai.models.generateContent({
+      model: GEMINI_IMAGE_MODEL,
+      contents: { parts: [{ text: finalPrompt }] },
+      config: { imageConfig: { aspectRatio: "16:9" } }
+    });
+
+    for (const part of response.candidates?.[0]?.content.parts || []) {
+      if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
+    }
+    throw new Error("No image data returned.");
+  } catch (err) {
+    console.error(err);
+    throw new Error("Visual generation failed.");
   }
 };
 
-// ─── generateVideoForPrompt ──────────────────────────────────────────────────
-export const generateVideoForPrompt = async (
-  prompt: string,
-  res: "720p" | "1080p" = "1080p",
-  img?: string
-): Promise<string> => {
-  ensureCloudFunctionsEnabled();
+export const generateVideoForPrompt = async (prompt: string, res: '720p' | '1080p' = '1080p', img?: string): Promise<string> => {
   try {
-    const fn = call<
-      { prompt: string; resolution: "720p" | "1080p"; imageUrl?: string },
-      { url?: string; videoUrl?: string; resultUrl?: string; data?: { url?: string } }
-    >("generateVideoForPrompt", 300000);
-    const result = await fn({ prompt, resolution: res, imageUrl: img });
-    const url = readUrl(result.data);
-    if (!url) {
-      throw new Error("Callable returned no video URL.");
+    const ai = getAIInstance();
+    const payload: any = { 
+      model: GEMINI_VIDEO_MODEL, 
+      prompt, 
+      config: { numberOfVideos: 1, resolution: res, aspectRatio: '16:9' } 
+    };
+    if (img) {
+      const b64 = img.split(',')[1] || img;
+      payload.image = { imageBytes: b64, mimeType: 'image/jpeg' };
     }
-    return url;
-  } catch (error) {
-    fail("Video generation failed.", error);
+
+    let op = await ai.models.generateVideos(payload);
+    while (!op.done) {
+      await new Promise(r => setTimeout(r, 10000));
+      op = await ai.operations.getVideosOperation({ operation: op });
+    }
+    const url = `${op.response?.generatedVideos?.[0]?.video?.uri}&key=${process.env.API_KEY}`;
+    const blob = await (await fetch(url)).blob();
+    return URL.createObjectURL(blob);
+  } catch (err) {
+    console.error(err);
+    throw new Error("Video clip failed.");
   }
 };
